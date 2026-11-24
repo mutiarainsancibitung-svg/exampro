@@ -9,7 +9,8 @@ import {
   LogOut,
   ExternalLink,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Sliders
 } from 'lucide-react';
 
 export const AdminLayout = ({ children, title }) => {
@@ -45,6 +46,7 @@ export const AdminLayout = ({ children, title }) => {
   // Navigasi berbasis RBAC (Role-Based Access Control)
   const allNavItems = [
     { label: 'Dashboard & Sesi', path: '/admin/dashboard', icon: LayoutDashboard, roles: ['superadmin', 'instructor', 'proctor'] },
+    { label: 'Atur Ujian & Mata Ujian', path: '/admin/exam-setup', icon: Sliders, roles: ['superadmin', 'instructor'] },
     { label: 'Bank Soal & Excel', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'] },
     { label: 'Data Peserta & Excel', path: '/admin/participants', icon: Users, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Rekap Nilai & Essay', path: '/admin/results', icon: Award, roles: ['superadmin', 'instructor'] },

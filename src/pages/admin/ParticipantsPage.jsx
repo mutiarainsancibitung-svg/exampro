@@ -16,6 +16,7 @@ import {
   FileSpreadsheet,
   Download,
   Trash2,
+  Edit3,
   Search,
   Check,
   AlertCircle,
@@ -39,13 +40,10 @@ export const ParticipantsPage = () => {
   const [filterKelas, setFilterKelas] = useState('ALL');
   const [filterPaket, setFilterPaket] = useState('ALL');
 
-  // State Aksi Massal Berdasarkan Kelas
-  const [bulkClass, setBulkClass] = useState('');
-  const [bulkPackage, setBulkPackage] = useState('');
-  const [bulkUpdating, setBulkUpdating] = useState(false);
-
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingParticipant, setEditingParticipant] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState([]);
   const [importError, setImportError] = useState('');
@@ -162,61 +160,40 @@ export const ParticipantsPage = () => {
     }
   };
 
-  // Aksi 1: Penentuan Paket Berdasarkan Kelas (Massal Dinamis)
-  const handleApplyPackageByClass = async () => {
-    if (!bulkClass.trim()) {
-      alert('Ketik atau pilih nama kelas terlebih dahulu!');
-      return;
-    }
-    if (!bulkPackage.trim()) {
-      alert('Ketik atau pilih nama paket / tugas yang ingin ditugaskan!');
-      return;
-    }
-
-    const targetParticipants = participants.filter(
-      p => (p.kelas || '').trim().toLowerCase() === bulkClass.trim().toLowerCase()
-    );
-
-    if (targetParticipants.length === 0) {
-      alert(`Tidak ada peserta yang terdaftar pada kelas "${bulkClass}".`);
-      return;
-    }
-
-    if (!window.confirm(`Yakin ingin menetapkan Paket/Tugas "${bulkPackage}" untuk SEMUA (${targetParticipants.length}) peserta di "${bulkClass}"?`)) {
-      return;
-    }
-
-    setBulkUpdating(true);
-    try {
-      const updatedList = targetParticipants.map(p => ({
-        ...p,
-        paket: bulkPackage.trim()
-      }));
-      await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
-      alert(`Berhasil menetapkan Paket "${bulkPackage}" ke ${targetParticipants.length} peserta di "${bulkClass}"!`);
-      loadData();
-    } catch (err) {
-      alert('Gagal menetapkan paket kelas: ' + err.message);
-    } finally {
-      setBulkUpdating(false);
-    }
+  // Buka Modal Edit Peserta
+  const handleOpenEdit = (p) => {
+    setEditingParticipant({
+      ...p,
+      username: p.username || '',
+      password: p.password || 'kemenag2026',
+      full_name: p.full_name || '',
+      gender: p.gender || 'Laki-Laki',
+      identifier: p.identifier || '',
+      kelas: p.kelas || '',
+      institution: p.institution || '',
+      paket: p.paket || '',
+      status: p.status || 'registered'
+    });
+    setShowEditModal(true);
   };
 
-  // Aksi 2: Penentuan Paket Berdasarkan Individu
-  const handleAssignIndividualPackage = async (participant, newPackage) => {
-    if (!newPackage) return;
+  // Simpan Pembaruan Peserta
+  const handleUpdateParticipant = async (e) => {
+    e.preventDefault();
+    if (!editingParticipant) return;
+    if (!editingParticipant.username.trim() || !editingParticipant.full_name.trim()) {
+      alert('Username dan Nama Lengkap wajib diisi!');
+      return;
+    }
+
     try {
-      await gasApi.saveParticipant(adminSecretKey, {
-        ...participant,
-        paket: newPackage.trim()
-      });
-      // Update state locally for instant snappy feedback
-      setParticipants(prev =>
-        prev.map(p => (p.participant_id === participant.participant_id ? { ...p, paket: newPackage.trim() } : p))
-      );
-    } catch (err) {
-      alert('Gagal memperbarui paket peserta: ' + err.message);
+      await gasApi.saveParticipant(adminSecretKey, editingParticipant);
+      setShowEditModal(false);
+      setEditingParticipant(null);
+      alert('Data peserta berhasil diperbarui!');
       loadData();
+    } catch (err) {
+      alert('Gagal memperbarui data peserta: ' + err.message);
     }
   };
 
@@ -259,78 +236,8 @@ export const ParticipantsPage = () => {
   });
 
   return (
-    <AdminLayout title="Data Peserta, Pemetaan Kelas & Penugasan Paket">
+    <AdminLayout title="Data & Kelola Akun Peserta Ujian">
       <div className="space-y-6">
-
-        {/* Panel Aksi Penentuan Paket Berdasarkan Kelas (100% Dinamis) */}
-        <div className="bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm space-y-3">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-100">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-2xl bg-kemenag-50 text-kemenag-700">
-                <GraduationCap className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-slate-800 text-sm">
-                  Penentuan Aksi Paket Berdasarkan Kelas (Dinamis)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Tetapkan paket/tugas secara massal ke seluruh peserta dalam suatu kelas sesuai data yang Anda input.
-                </p>
-              </div>
-            </div>
-
-            {/* Input Kelas & Paket Massal */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Input Kelas dengan Datalist Dinamis */}
-              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-600">Kelas:</span>
-                <input
-                  type="text"
-                  list="dynamic-classes-datalist"
-                  value={bulkClass}
-                  onChange={(e) => setBulkClass(e.target.value)}
-                  placeholder="Ketik/Pilih Kelas"
-                  className="bg-transparent text-xs font-extrabold text-kemenag-800 focus:outline-none w-36"
-                />
-                <datalist id="dynamic-classes-datalist">
-                  {dynamicClasses.map(c => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* Input Paket / Tugas dengan Datalist Dinamis */}
-              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-600">Tugaskan:</span>
-                <input
-                  type="text"
-                  list="dynamic-packages-datalist"
-                  value={bulkPackage}
-                  onChange={(e) => setBulkPackage(e.target.value)}
-                  placeholder="Ketik/Pilih Paket"
-                  className="bg-transparent text-xs font-extrabold text-emerald-800 focus:outline-none w-36"
-                />
-                <datalist id="dynamic-packages-datalist">
-                  {dynamicPackages.map(p => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-              </div>
-
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Check}
-                disabled={bulkUpdating || !bulkClass.trim() || !bulkPackage.trim()}
-                onClick={handleApplyPackageByClass}
-                className="shadow-sm"
-              >
-                {bulkUpdating ? 'Menerapkan...' : 'Terapkan ke Kelas'}
-              </Button>
-            </div>
-          </div>
-        </div>
-
         {/* Bar Filter & Aksi Tambah / Import Excel */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -452,11 +359,11 @@ export const ParticipantsPage = () => {
                     <th className="py-3 px-4">Nama Lengkap & NIP/NIM</th>
                     <th className="py-3 px-4">Username & Password</th>
                     <th className="py-3 px-4">Kelas</th>
-                    <th className="py-3 px-4">Aksi: Paket / Tugas</th>
                     <th className="py-3 px-4">Jenis Kelamin</th>
                     <th className="py-3 px-4">Asal Madrasah / Sekolah</th>
+                    <th className="py-3 px-4">Paket Soal</th>
                     <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-center">Hapus</th>
+                    <th className="py-3 px-4 text-center w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -495,36 +402,6 @@ export const ParticipantsPage = () => {
                         </span>
                       </td>
 
-                      {/* Aksi: Pemilihan Paket Individu Dinamis */}
-                      <td className="py-3.5 px-4">
-                        <select
-                          value={p.paket || ''}
-                          onChange={(e) => {
-                            if (e.target.value === '__NEW__') {
-                              const custom = window.prompt('Masukkan nama paket / tugas baru untuk peserta ini:', p.paket || '');
-                              if (custom && custom.trim()) {
-                                handleAssignIndividualPackage(p, custom.trim());
-                              }
-                            } else {
-                              handleAssignIndividualPackage(p, e.target.value);
-                            }
-                          }}
-                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-kemenag-600 cursor-pointer shadow-sm"
-                          title="Klik untuk memilih atau menambahkan paket/tugas untuk peserta ini"
-                        >
-                          {p.paket && !dynamicPackages.includes(p.paket) && (
-                            <option value={p.paket}>{p.paket}</option>
-                          )}
-                          {dynamicPackages.map(pkg => (
-                            <option key={pkg} value={pkg}>{pkg}</option>
-                          ))}
-                          {dynamicPackages.length === 0 && (
-                            <option value={p.paket || 'Pretest'}>{p.paket || 'Pretest'}</option>
-                          )}
-                          <option value="__NEW__">+ Ketik Tugas / Paket Baru...</option>
-                        </select>
-                      </td>
-
                       {/* Gender */}
                       <td className="py-3.5 px-4">
                         <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
@@ -541,6 +418,13 @@ export const ParticipantsPage = () => {
                         {p.institution || '-'}
                       </td>
 
+                      {/* Paket Soal yang Ditugaskan */}
+                      <td className="py-3.5 px-4">
+                        <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
+                          {p.paket || 'Belum Diatur'}
+                        </span>
+                      </td>
+
                       {/* Status */}
                       <td className="py-3.5 px-4">
                         <span className={`px-2.5 py-1 rounded-xl text-[10px] font-bold ${
@@ -554,15 +438,24 @@ export const ParticipantsPage = () => {
                         </span>
                       </td>
 
-                      {/* Aksi Hapus */}
+                      {/* Aksi: Edit & Hapus */}
                       <td className="py-3.5 px-4 text-center">
-                        <button
-                          onClick={() => handleDelete(p.participant_id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 transition"
-                          title="Hapus Peserta"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenEdit(p)}
+                            className="p-1.5 rounded-xl text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition border border-emerald-200"
+                            title="Edit Data Peserta"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p.participant_id)}
+                            className="p-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 transition border border-rose-200"
+                            title="Hapus Peserta"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -793,6 +686,148 @@ export const ParticipantsPage = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Modal Edit Peserta */}
+      {showEditModal && editingParticipant && (
+        <Modal
+          isOpen={showEditModal}
+          onClose={() => { setShowEditModal(false); setEditingParticipant(null); }}
+          title="Edit Data Peserta Ujian"
+        >
+          <form onSubmit={handleUpdateParticipant} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Username Login</label>
+                <input
+                  type="text"
+                  value={editingParticipant.username}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, username: e.target.value })}
+                  placeholder="Contoh: peserta01"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+                <input
+                  type="text"
+                  value={editingParticipant.password}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, password: e.target.value })}
+                  placeholder="Password"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Lengkap & Gelar</label>
+              <input
+                type="text"
+                value={editingParticipant.full_name}
+                onChange={(e) => setEditingParticipant({ ...editingParticipant, full_name: e.target.value })}
+                placeholder="Nama Lengkap Peserta"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Kelas</label>
+                <input
+                  type="text"
+                  list="edit-classes-datalist"
+                  value={editingParticipant.kelas}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, kelas: e.target.value })}
+                  placeholder="Ketik/Pilih Kelas"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+                  required
+                />
+                <datalist id="edit-classes-datalist">
+                  {dynamicClasses.map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Paket Soal</label>
+                <input
+                  type="text"
+                  list="edit-packages-datalist"
+                  value={editingParticipant.paket}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, paket: e.target.value })}
+                  placeholder="Paket Soal"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-amber-900"
+                />
+                <datalist id="edit-packages-datalist">
+                  {dynamicPackages.map(p => <option key={p} value={p} />)}
+                </datalist>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis Kelamin</label>
+                <select
+                  value={editingParticipant.gender}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, gender: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                >
+                  <option value="Laki-Laki">Laki-Laki</option>
+                  <option value="Perempuan">Perempuan</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">NIP / NIM</label>
+                <input
+                  type="text"
+                  value={editingParticipant.identifier}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, identifier: e.target.value })}
+                  placeholder="Nomor Identitas (Opsional)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Asal Madrasah / Sekolah</label>
+                <input
+                  type="text"
+                  value={editingParticipant.institution}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, institution: e.target.value })}
+                  placeholder="Instansi / Madrasah"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Status Ujian</label>
+                <select
+                  value={editingParticipant.status}
+                  onChange={(e) => setEditingParticipant({ ...editingParticipant, status: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+                >
+                  <option value="registered">Siap / Belum Mulai (registered)</option>
+                  <option value="in_progress">Sedang Ujian (in_progress)</option>
+                  <option value="submitted">Sudah Selesai (submitted)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-3 border-t border-slate-100">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => { setShowEditModal(false); setEditingParticipant(null); }}
+              >
+                Batal
+              </Button>
+              <Button variant="primary" type="submit" className="flex-1">
+                Simpan Perubahan
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </AdminLayout>
   );
 };
