@@ -35,7 +35,8 @@ export const QuestionBankPage = () => {
       { id: 'A', text: '', image: '' },
       { id: 'B', text: '', image: '' },
       { id: 'C', text: '', image: '' },
-      { id: 'D', text: '', image: '' }
+      { id: 'D', text: '', image: '' },
+      { id: 'E', text: '', image: '' }
     ]
   });
 
@@ -95,7 +96,8 @@ export const QuestionBankPage = () => {
           { id: 'A', text: '', image: '' },
           { id: 'B', text: '', image: '' },
           { id: 'C', text: '', image: '' },
-          { id: 'D', text: '', image: '' }
+          { id: 'D', text: '', image: '' },
+          { id: 'E', text: '', image: '' }
         ]
       });
       loadData();
@@ -522,7 +524,7 @@ export const QuestionBankPage = () => {
           {/* Opsi Jawaban (Jika Pilihan Ganda) */}
           {form.type !== 'essay' && (
             <div className="space-y-2 pt-2 border-t border-slate-100">
-              <label className="block text-xs font-semibold text-slate-700">Pilihan Jawaban (A-D)</label>
+              <label className="block text-xs font-semibold text-slate-700">Pilihan Jawaban (A-E)</label>
               {form.options.map((opt, i) => (
                 <div key={opt.id} className="flex items-center gap-2">
                   <span className="w-6 h-6 rounded-lg bg-kemenag-50 text-kemenag-800 font-bold text-xs flex items-center justify-center shrink-0">

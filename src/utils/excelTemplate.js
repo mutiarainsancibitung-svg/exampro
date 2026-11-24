@@ -18,6 +18,7 @@ export const QUESTION_HEADERS = [
   'Opsi_B',
   'Opsi_C',
   'Opsi_D',
+  'Opsi_E',
   'Kunci_Jawaban',
   'Bobot'
 ];
@@ -33,6 +34,7 @@ export const SAMPLE_QUESTIONS = [
     'Core Basic Technology',
     'Cloud-Based Tracking',
     'Central Binary Task',
+    'Computer-Based Teaching',
     'A',
     1
   ],
@@ -46,6 +48,7 @@ export const SAMPLE_QUESTIONS = [
     'Profil Generasi Emas Digital',
     'Profil Santri Berkualitas Global',
     'Profil Guru Profesional Masa Depan',
+    'Profil Cendekiawan Muslim Berkemajuan',
     'A',
     1
   ],
@@ -59,6 +62,7 @@ export const SAMPLE_QUESTIONS = [
     'Google Sheets (Relational Spreadsheet)',
     'Google Drive (Cloud Asset Storage)',
     'Kubernetes Cluster On-Premise',
+    'Local Virtual Machine Server',
     'A,B,C',
     2
   ],
@@ -67,6 +71,7 @@ export const SAMPLE_QUESTIONS = [
     'Postest',
     'essay',
     'Jelaskan bagaimana pendekatan pembelajaran berbasis STREAM dan AI dapat diintegrasikan dalam materi Fikih / Akidah Akhlak!',
+    '',
     '',
     '',
     '',
@@ -96,6 +101,7 @@ export const downloadExcelTemplate = () => {
     { wch: 30 }, // Opsi_B
     { wch: 30 }, // Opsi_C
     { wch: 30 }, // Opsi_D
+    { wch: 30 }, // Opsi_E
     { wch: 15 }, // Kunci_Jawaban
     { wch: 8 }   // Bobot
   ];
@@ -128,6 +134,7 @@ export const parseUploadedQuestionsFile = async (file) => {
   const idxB = headerRow.findIndex(h => h.includes('opsi_b') || h === 'b');
   const idxC = headerRow.findIndex(h => h.includes('opsi_c') || h === 'c');
   const idxD = headerRow.findIndex(h => h.includes('opsi_d') || h === 'd');
+  const idxE = headerRow.findIndex(h => h.includes('opsi_e') || h === 'e');
   const idxKey = headerRow.findIndex(h => h.includes('kunci'));
   const idxWeight = headerRow.findIndex(h => h.includes('bobot'));
 
@@ -155,14 +162,16 @@ export const parseUploadedQuestionsFile = async (file) => {
     const optB = (idxB !== -1 ? String(row[idxB] || '') : String(row[6] || '')).trim();
     const optC = (idxC !== -1 ? String(row[idxC] || '') : String(row[7] || '')).trim();
     const optD = (idxD !== -1 ? String(row[idxD] || '') : String(row[8] || '')).trim();
-    const keyAns = (idxKey !== -1 ? String(row[idxKey] || '') : String(row[9] || '')).trim().toUpperCase();
-    const weightVal = Number(idxWeight !== -1 ? row[idxWeight] : row[10]) || 1;
+    const optE = (idxE !== -1 ? String(row[idxE] || '') : String(row[9] || '')).trim();
+    const keyAns = (idxKey !== -1 ? String(row[idxKey] || '') : (row[10] !== undefined ? String(row[10] || '') : String(row[9] || ''))).trim().toUpperCase();
+    const weightVal = Number(idxWeight !== -1 ? row[idxWeight] : (row[11] !== undefined ? row[11] : row[10])) || 1;
 
     const options = type !== 'essay' ? [
       { id: 'A', text: optA, image: '' },
       { id: 'B', text: optB, image: '' },
       { id: 'C', text: optC, image: '' },
-      { id: 'D', text: optD, image: '' }
+      { id: 'D', text: optD, image: '' },
+      { id: 'E', text: optE, image: '' }
     ].filter(o => o.text !== '') : [];
 
     parsedQuestions.push({
