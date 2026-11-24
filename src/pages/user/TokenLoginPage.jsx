@@ -23,6 +23,8 @@ export const TokenLoginPage = () => {
   // Form Tahap 2: Konfirmasi Data Peserta (Tanggal Lahir Dihapus Sesuai Permintaan)
   const [gender, setGender] = useState('Laki-Laki');
   const [confirmFullName, setConfirmFullName] = useState('');
+  const [userKelas, setUserKelas] = useState('Kelas A');
+  const [userPaket, setUserPaket] = useState('Pretest');
   const [tokenInput, setTokenInput] = useState('');
 
   // Info Sesi & Token Berputar Otomatis Setiap 1 Menit
@@ -74,8 +76,8 @@ export const TokenLoginPage = () => {
     setSecondsLeft(getSecondsRemainingInCurrentMinute());
   };
 
-  // Handler Tahap 1: Login
-  const handleStage1Login = (e) => {
+  // Handler Tahap 1: Login berdasarkan Akun yang Dibuat Admin
+  const handleStage1Login = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -84,11 +86,26 @@ export const TokenLoginPage = () => {
       return;
     }
 
-    if (!confirmFullName) {
-      setConfirmFullName(username.toUpperCase() + ' - PESERTA PAI');
-    }
+    setLoading(true);
+    try {
+      const res = await gasApi.participantLogin({
+        username: username.trim(),
+        password: password.trim()
+      });
 
-    setStage(2);
+      if (res.status === 'success' && res.participant) {
+        const p = res.participant;
+        setConfirmFullName(p.full_name || username.toUpperCase() + ' - PESERTA PAI');
+        setGender(p.gender || 'Laki-Laki');
+        setUserKelas(p.kelas || 'Kelas A');
+        setUserPaket(p.paket || 'Pretest');
+        setStage(2);
+      }
+    } catch (err) {
+      setError(err.message || 'Username atau password tidak cocok.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handler Tahap 2: Konfirmasi & Masuk Ujian
@@ -113,6 +130,8 @@ export const TokenLoginPage = () => {
         fullName: confirmFullName.trim(),
         identifier: username.trim(),
         gender: gender,
+        kelas: userKelas,
+        paket: userPaket,
         sessionSalt: activeSession?.session_id || 'PAI_TOT'
       });
 
@@ -123,6 +142,8 @@ export const TokenLoginPage = () => {
             fullName: confirmFullName.trim(),
             identifier: username.trim(),
             gender: gender,
+            kelas: userKelas,
+            paket: userPaket,
             token: tokenInput.trim().toUpperCase(),
             startTime: res.startTime
           },
@@ -145,6 +166,8 @@ export const TokenLoginPage = () => {
     setPassword('kemenag2026');
     setConfirmFullName('Drs. H. Ahmad Fauzi, M.Pd');
     setGender('Laki-Laki');
+    setUserKelas('Kelas A');
+    setUserPaket('Pretest');
     setTokenInput(rotatingToken);
     setError('');
   };
@@ -358,11 +381,31 @@ export const TokenLoginPage = () => {
                     </div>
                   </div>
 
+                  {/* Kelas & Paket yang Ditugaskan oleh Admin */}
+                  <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 uppercase">Kelas</label>
+                      <span className="text-xs font-extrabold px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 inline-block">
+                        {userKelas}
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 uppercase">Paket Ujian</label>
+                      <span className={`text-xs font-extrabold px-2.5 py-1 rounded-xl border inline-block uppercase ${
+                        userPaket.toLowerCase().includes('post')
+                          ? 'bg-purple-100 text-purple-900 border-purple-200'
+                          : 'bg-amber-100 text-amber-900 border-amber-200'
+                      }`}>
+                        {userPaket}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Mata Ujian */}
                   <div className="border-b border-slate-100 pb-2">
                     <label className="block text-[11px] font-semibold text-slate-500 uppercase">Mata Ujian</label>
                     <span className="text-sm font-bold text-kemenag-700">
-                      {activeSession?.title || 'Pretest Pelatihan Guru PAI (Paket 1)'}
+                      Pelatihan Guru PAI ({userPaket})
                     </span>
                   </div>
 

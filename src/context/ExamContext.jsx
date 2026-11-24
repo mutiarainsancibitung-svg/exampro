@@ -43,7 +43,11 @@ export const ExamProvider = ({ children }) => {
     if (!participant || !sessionData) return;
     setLoading(true);
     try {
-      const res = await gasApi.getExamQuestions(sessionData.token || participant.token, participant.participantId);
+      const res = await gasApi.getExamQuestions(
+        sessionData.token || participant.token,
+        participant.participantId,
+        participant.paket
+      );
       if (res.status === 'success') {
         setQuestions(res.questions || []);
       }

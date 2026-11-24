@@ -15,8 +15,8 @@ const SHEETS = {
 
 const HEADERS = {
   Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at'],
-  Questions: ['question_id', 'session_id', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
-  Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'institution', 'token_used', 'start_time', 'status'],
+  Questions: ['question_id', 'session_id', 'paket', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
+  Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'kelas', 'institution', 'paket', 'token_used', 'start_time', 'status'],
   Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at']
 };
 
@@ -37,7 +37,7 @@ function doGet(e) {
         responseData = handleGetSession(params.token);
         break;
       case 'getExamQuestions':
-        responseData = handleGetExamQuestions(params.token, params.participantId);
+        responseData = handleGetExamQuestions(params.token, params.participantId, params.paket);
         break;
       case 'getAdminDashboard':
         responseData = handleGetAdminDashboard(params.secretKey);
@@ -70,6 +70,9 @@ function doPost(e) {
     switch (action) {
       case 'adminLogin':
         responseData = handleAdminLogin(payload.secretKey);
+        break;
+      case 'participantLogin':
+        responseData = handleParticipantLogin(payload);
         break;
       case 'startExam':
         responseData = handleStartExam(payload);
@@ -256,20 +259,25 @@ function handleGetSession(token, sessionSalt) {
   };
 }
 
-function handleGetExamQuestions(token, participantId) {
+function handleGetExamQuestions(token, participantId, paket) {
   const sessionRes = handleGetSession(token);
   if (sessionRes.status !== 'success') return sessionRes;
 
   const session = sessionRes.session;
-  const questions = getSheetDataAsObjects(SHEETS.QUESTIONS)
-    .filter(q => String(q.session_id) === String(session.session_id));
+  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS);
 
-  if (questions.length === 0) {
-    return { status: 'error', message: 'Belum ada soal pada sesi ujian ini' };
+  let targetQuestions = allQuestions;
+  if (paket) {
+    const byPaket = allQuestions.filter(q => String(q.paket || 'Pretest').toLowerCase() === String(paket).toLowerCase());
+    if (byPaket.length > 0) targetQuestions = byPaket;
+  }
+
+  if (targetQuestions.length === 0) {
+    return { status: 'error', message: 'Belum ada soal pada paket ujian ini' };
   }
 
   // Sensor kunci jawaban!
-  let safeQuestions = questions.map(q => {
+  let safeQuestions = targetQuestions.map(q => {
     let parsedOptions = [];
     try {
       parsedOptions = typeof q.options_json === 'string' ? JSON.parse(q.options_json) : (q.options_json || []);
@@ -283,6 +291,7 @@ function handleGetExamQuestions(token, participantId) {
 
     return {
       question_id: q.question_id,
+      paket: q.paket || 'Pretest',
       type: q.type,
       question_text: q.question_text,
       image_url: q.image_url || '',
@@ -298,7 +307,8 @@ function handleGetExamQuestions(token, participantId) {
   return {
     status: 'success',
     session: session,
-    questions: safeQuestions
+    questions: safeQuestions,
+    paket: paket || 'Pretest'
   };
 }
 
@@ -539,7 +549,8 @@ function handleSaveQuestion(payload) {
 
   const rowData = [
     qId,
-    question.session_id,
+    question.session_id || 'SES-001',
+    question.paket || 'Pretest',
     question.type || 'single_choice',
     question.question_text,
     question.image_url || '',
@@ -673,6 +684,41 @@ function shuffleArray(array) {
   return arr;
 }
 
+function handleParticipantLogin(payload) {
+  const { username, password } = payload;
+  if (!username || !password) {
+    return { status: 'error', message: 'Username dan password wajib diisi' };
+  }
+
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
+  const userClean = String(username).trim().toLowerCase();
+  const passClean = String(password).trim();
+
+  const found = participants.find(
+    p => String(p.username || '').trim().toLowerCase() === userClean &&
+         String(p.password || 'kemenag2026').trim() === passClean
+  );
+
+  if (!found) {
+    return { status: 'error', message: 'Username atau password salah! Pastikan akun telah didaftarkan oleh Admin.' };
+  }
+
+  return {
+    status: 'success',
+    participant: {
+      participant_id: found.participant_id,
+      username: found.username,
+      full_name: found.full_name,
+      gender: found.gender || 'Laki-Laki',
+      identifier: found.identifier,
+      kelas: found.kelas || 'Kelas A',
+      institution: found.institution || '',
+      paket: found.paket || 'Pretest',
+      status: found.status
+    }
+  };
+}
+
 function handleSaveParticipant(payload) {
   const { secretKey, participant } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
@@ -701,7 +747,9 @@ function handleSaveParticipant(payload) {
     participant.full_name || participant.username || '',
     participant.gender || 'Laki-Laki',
     participant.identifier || participant.username || '',
+    participant.kelas || 'Kelas A',
     participant.institution || '',
+    participant.paket || 'Pretest',
     participant.token_used || '',
     participant.start_time || new Date().toISOString(),
     participant.status || 'registered'

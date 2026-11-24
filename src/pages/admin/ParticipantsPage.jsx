@@ -21,7 +21,10 @@ import {
   AlertCircle,
   Building,
   IdCard,
-  Lock
+  Lock,
+  Layers,
+  GraduationCap,
+  Sparkles
 } from 'lucide-react';
 
 export const ParticipantsPage = () => {
@@ -29,10 +32,15 @@ export const ParticipantsPage = () => {
   const navigate = useNavigate();
 
   const [participants, setParticipants] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [selectedSession, setSelectedSession] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterGender, setFilterGender] = useState('ALL');
+  const [filterKelas, setFilterKelas] = useState('ALL');
+  const [filterPaket, setFilterPaket] = useState('ALL');
+
+  // State Aksi Massal Berdasarkan Kelas
+  const [bulkClass, setBulkClass] = useState('');
+  const [bulkPackage, setBulkPackage] = useState('Pretest');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -41,15 +49,16 @@ export const ParticipantsPage = () => {
   const [importError, setImportError] = useState('');
   const [importing, setImporting] = useState(false);
 
-  // Form Tambah Peserta Manual
+  // Form Tambah Peserta Manual (Username & Password ditentukan admin)
   const [form, setForm] = useState({
-    session_id: '',
     username: '',
     password: '',
     full_name: '',
     gender: 'Laki-Laki',
     identifier: '',
-    institution: ''
+    kelas: 'Kelas A',
+    institution: '',
+    paket: 'Pretest'
   });
 
   useEffect(() => {
@@ -64,11 +73,11 @@ export const ParticipantsPage = () => {
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
-        setParticipants(res.participants || []);
-        setSessions(res.sessions || []);
-        if (res.sessions && res.sessions.length > 0 && !selectedSession) {
-          setSelectedSession(res.sessions[0].session_id);
-          setForm(prev => ({ ...prev, session_id: res.sessions[0].session_id }));
+        const parts = res.participants || [];
+        setParticipants(parts);
+        if (parts.length > 0 && !bulkClass) {
+          const firstClass = parts.find(p => p.kelas)?.kelas || 'Kelas A';
+          setBulkClass(firstClass);
         }
       }
     } catch (err) {
@@ -87,21 +96,25 @@ export const ParticipantsPage = () => {
     try {
       await gasApi.saveParticipant(adminSecretKey, {
         ...form,
-        session_id: selectedSession || form.session_id,
-        password: form.password || 'kemenag2026'
+        username: form.username.trim(),
+        password: form.password.trim() || 'kemenag2026',
+        full_name: form.full_name.trim(),
+        kelas: form.kelas.trim() || 'Kelas A',
+        paket: form.paket.trim() || 'Pretest'
       });
       setShowAddModal(false);
       setForm({
-        session_id: selectedSession,
         username: '',
         password: '',
         full_name: '',
         gender: 'Laki-Laki',
         identifier: '',
-        institution: ''
+        kelas: 'Kelas A',
+        institution: '',
+        paket: 'Pretest'
       });
       loadData();
-      alert('Data peserta berhasil ditambahkan!');
+      alert('Data peserta berhasil disimpan!');
     } catch (err) {
       alert('Gagal menyimpan peserta: ' + err.message);
     }
@@ -121,16 +134,12 @@ export const ParticipantsPage = () => {
     }
   };
 
-  // Eksekusi Batch Save Peserta
+  // Eksekusi Batch Save Peserta dari Excel
   const handleExecuteImport = async () => {
     if (importPreview.length === 0) return;
     setImporting(true);
     try {
-      const withSession = importPreview.map(p => ({
-        ...p,
-        session_id: selectedSession || 'SES-001'
-      }));
-      await gasApi.batchSaveParticipants(adminSecretKey, withSession);
+      await gasApi.batchSaveParticipants(adminSecretKey, importPreview);
       setShowImportModal(false);
       setImportPreview([]);
       alert(`Berhasil mengimpor ${importPreview.length} data peserta dari file Excel!`);
@@ -139,6 +148,58 @@ export const ParticipantsPage = () => {
       alert('Gagal mengimpor peserta: ' + err.message);
     } finally {
       setImporting(false);
+    }
+  };
+
+  // Aksi 1: Penentuan Paket Berdasarkan Kelas (Massal)
+  const handleApplyPackageByClass = async () => {
+    if (!bulkClass) {
+      alert('Pilih kelas terlebih dahulu!');
+      return;
+    }
+    const targetParticipants = participants.filter(
+      p => (p.kelas || '').toLowerCase() === bulkClass.toLowerCase()
+    );
+
+    if (targetParticipants.length === 0) {
+      alert(`Tidak ada peserta yang terdaftar pada ${bulkClass}.`);
+      return;
+    }
+
+    if (!window.confirm(`Yakin ingin menetapkan Paket "${bulkPackage}" untuk SEMUA (${targetParticipants.length}) peserta di ${bulkClass}?`)) {
+      return;
+    }
+
+    setBulkUpdating(true);
+    try {
+      const updatedList = targetParticipants.map(p => ({
+        ...p,
+        paket: bulkPackage
+      }));
+      await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
+      alert(`Berhasil menetapkan Paket ${bulkPackage} ke ${targetParticipants.length} peserta di ${bulkClass}!`);
+      loadData();
+    } catch (err) {
+      alert('Gagal menetapkan paket kelas: ' + err.message);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  // Aksi 2: Penentuan Paket Berdasarkan Individu
+  const handleAssignIndividualPackage = async (participant, newPackage) => {
+    try {
+      await gasApi.saveParticipant(adminSecretKey, {
+        ...participant,
+        paket: newPackage
+      });
+      // Update state locally for instant snappy feedback
+      setParticipants(prev =>
+        prev.map(p => (p.participant_id === participant.participant_id ? { ...p, paket: newPackage } : p))
+      );
+    } catch (err) {
+      alert('Gagal memperbarui paket peserta: ' + err.message);
+      loadData();
     }
   };
 
@@ -153,6 +214,13 @@ export const ParticipantsPage = () => {
     }
   };
 
+  // Ekstrak Kelas & Paket Dinamis untuk Filter
+  const detectedClasses = Array.from(new Set(participants.map(p => p.kelas || 'Kelas A').filter(Boolean)));
+  const classList = detectedClasses.length > 0 ? detectedClasses : ['Kelas A', 'Kelas B'];
+
+  const detectedPackages = Array.from(new Set(participants.map(p => p.paket || 'Pretest').filter(Boolean)));
+  const packageList = Array.from(new Set(['Pretest', 'Postest', ...detectedPackages]));
+
   // Filter Peserta
   const filteredParticipants = participants.filter(p => {
     const matchSearch =
@@ -164,26 +232,115 @@ export const ParticipantsPage = () => {
     const matchGender =
       filterGender === 'ALL' || (p.gender || '').toLowerCase() === filterGender.toLowerCase();
 
-    return matchSearch && matchGender;
+    const matchKelas =
+      filterKelas === 'ALL' || (p.kelas || 'Kelas A').toLowerCase() === filterKelas.toLowerCase();
+
+    const matchPaket =
+      filterPaket === 'ALL' || (p.paket || 'Pretest').toLowerCase() === filterPaket.toLowerCase();
+
+    return matchSearch && matchGender && matchKelas && matchPaket;
   });
 
   return (
-    <AdminLayout title="Manajemen Data Peserta & Template Excel">
+    <AdminLayout title="Data Peserta, Pemetaan Kelas & Paket Ujian">
       <div className="space-y-6">
-        {/* Bar Filter & Aksi */}
+
+        {/* Panel Aksi Penentuan Paket Berdasarkan Kelas */}
+        <div className="bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-2xl bg-kemenag-50 text-kemenag-700">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">
+                  Penentuan Aksi Paket Berdasarkan Kelas
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Tetapkan paket ujian (Pretest / Postest) secara massal ke seluruh peserta dalam satu kelas sekaligus.
+                </p>
+              </div>
+            </div>
+
+            {/* Form Aksi Kelas */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-600">Pilih Kelas:</span>
+                <select
+                  value={bulkClass || (classList[0] || '')}
+                  onChange={(e) => setBulkClass(e.target.value)}
+                  className="bg-transparent text-xs font-extrabold text-kemenag-800 focus:outline-none cursor-pointer"
+                >
+                  {classList.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-600">Tugaskan Paket:</span>
+                <select
+                  value={bulkPackage}
+                  onChange={(e) => setBulkPackage(e.target.value)}
+                  className="bg-transparent text-xs font-extrabold text-emerald-800 focus:outline-none cursor-pointer"
+                >
+                  <option value="Pretest">Pretest</option>
+                  <option value="Postest">Postest</option>
+                </select>
+              </div>
+
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Check}
+                disabled={bulkUpdating}
+                onClick={handleApplyPackageByClass}
+                className="shadow-sm"
+              >
+                {bulkUpdating ? 'Menerapkan...' : 'Terapkan ke Kelas'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Bar Filter & Aksi Tambah / Import Excel */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Input Pencarian */}
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari Nama, NIP, Asal Madrasah..."
+                placeholder="Cari Nama, NIP, Username..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-4 py-2 rounded-2xl border border-slate-200 text-xs w-64 bg-slate-50 focus:bg-white focus:outline-none focus:border-kemenag-600 font-medium"
+                className="pl-9 pr-4 py-2 rounded-2xl border border-slate-200 text-xs w-56 bg-slate-50 focus:bg-white focus:outline-none focus:border-kemenag-600 font-medium"
               />
             </div>
+
+            {/* Filter Kelas */}
+            <select
+              value={filterKelas}
+              onChange={(e) => setFilterKelas(e.target.value)}
+              className="px-3 py-2 rounded-2xl border border-slate-200 text-xs bg-slate-50 font-bold text-slate-700"
+            >
+              <option value="ALL">Semua Kelas</option>
+              {classList.map(cls => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
+
+            {/* Filter Paket */}
+            <select
+              value={filterPaket}
+              onChange={(e) => setFilterPaket(e.target.value)}
+              className="px-3 py-2 rounded-2xl border border-slate-200 text-xs bg-slate-50 font-bold text-slate-700"
+            >
+              <option value="ALL">Semua Paket</option>
+              {packageList.map(pkt => (
+                <option key={pkt} value={pkt}>{pkt}</option>
+              ))}
+            </select>
 
             {/* Filter Gender */}
             <select
@@ -248,7 +405,7 @@ export const ParticipantsPage = () => {
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">Daftar Peserta Pelatihan Guru PAI</h3>
                 <p className="text-xs text-slate-500">
-                  Total {filteredParticipants.length} peserta terdaftar dalam sistem evaluasi.
+                  Total {filteredParticipants.length} peserta ditampilkan. Username dan Password dikelola penuh oleh Admin.
                 </p>
               </div>
             </div>
@@ -257,7 +414,7 @@ export const ParticipantsPage = () => {
           <div className="overflow-x-auto">
             {filteredParticipants.length === 0 ? (
               <div className="p-12 text-center text-slate-500 text-xs">
-                Belum ada data peserta. Klik <strong>Download Template Excel (.xlsx)</strong> untuk mengunduh template, lalu upload via <strong>Import dari Excel (.xlsx)</strong>.
+                Belum ada data peserta yang cocok. Klik <strong>Download Template Excel (.xlsx)</strong> untuk mengunduh template dengan header Kelas & Paket, lalu upload via <strong>Import dari Excel (.xlsx)</strong>.
               </div>
             ) : (
               <table className="w-full text-left border-collapse text-xs">
@@ -265,11 +422,13 @@ export const ParticipantsPage = () => {
                   <tr className="bg-slate-50/80 border-b border-slate-100 text-slate-600 font-bold">
                     <th className="py-3 px-4 w-12 text-center">No</th>
                     <th className="py-3 px-4">Nama Lengkap & NIP/NIM</th>
-                    <th className="py-3 px-4">Username & Password</th>
+                    <th className="py-3 px-4">Username & Password Admin</th>
+                    <th className="py-3 px-4">Kelas</th>
+                    <th className="py-3 px-4">Aksi: Paket Ujian</th>
                     <th className="py-3 px-4">Jenis Kelamin</th>
                     <th className="py-3 px-4">Asal Madrasah / Sekolah</th>
-                    <th className="py-3 px-4">Status Ujian</th>
-                    <th className="py-3 px-4 text-center">Aksi</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-center">Hapus</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -278,24 +437,56 @@ export const ParticipantsPage = () => {
                       <td className="py-3.5 px-4 text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
+
+                      {/* Nama & NIP */}
                       <td className="py-3.5 px-4">
                         <span className="font-bold text-slate-800 block text-sm">
                           {p.full_name || p.username}
                         </span>
                         <span className="text-[11px] text-slate-400 font-medium">
-                          NIP/NIM: {p.identifier || '-'}
+                          NIP: {p.identifier || '-'}
                         </span>
                       </td>
+
+                      {/* Username & Password yang Ditentukan Admin */}
                       <td className="py-3.5 px-4">
-                        <span className="font-mono font-bold text-kemenag-800 bg-kemenag-50 border border-kemenag-200 px-2 py-0.5 rounded-lg text-[11px]">
-                          {p.username || '-'}
-                        </span>
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          Pass: {p.password || 'kemenag2026'}
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-kemenag-800 bg-kemenag-50 border border-kemenag-200 px-2.5 py-0.5 rounded-lg text-xs">
+                            {p.username || '-'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 font-mono block mt-1">
+                          Pass: <strong className="text-slate-800 font-semibold">{p.password || 'kemenag2026'}</strong>
                         </span>
                       </td>
+
+                      {/* Kelas */}
                       <td className="py-3.5 px-4">
-                        <span className={`px-2.5 py-1 rounded-xl text-[10px] font-bold ${
+                        <span className="px-2.5 py-1 rounded-xl text-[11px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          {p.kelas || 'Kelas A'}
+                        </span>
+                      </td>
+
+                      {/* Aksi: Pemilihan Paket Individu Langsung di Baris */}
+                      <td className="py-3.5 px-4">
+                        <select
+                          value={p.paket || 'Pretest'}
+                          onChange={(e) => handleAssignIndividualPackage(p, e.target.value)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                            (p.paket || 'Pretest').toLowerCase().includes('post')
+                              ? 'bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100'
+                              : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                          }`}
+                          title="Klik untuk mengubah paket ujian peserta ini"
+                        >
+                          <option value="Pretest">Pretest</option>
+                          <option value="Postest">Postest</option>
+                        </select>
+                      </td>
+
+                      {/* Gender */}
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
                           p.gender === 'Perempuan'
                             ? 'bg-purple-50 text-purple-700 border border-purple-200'
                             : 'bg-blue-50 text-blue-700 border border-blue-200'
@@ -303,9 +494,13 @@ export const ParticipantsPage = () => {
                           {p.gender || 'Laki-Laki'}
                         </span>
                       </td>
+
+                      {/* Asal Madrasah */}
                       <td className="py-3.5 px-4 text-slate-600 font-medium">
-                        {p.institution || 'Madrasah / Sekolah Peserta'}
+                        {p.institution || 'Madrasah / Sekolah'}
                       </td>
+
+                      {/* Status */}
                       <td className="py-3.5 px-4">
                         <span className={`px-2.5 py-1 rounded-xl text-[10px] font-bold ${
                           p.status === 'submitted'
@@ -314,9 +509,11 @@ export const ParticipantsPage = () => {
                             ? 'bg-amber-100 text-amber-800 animate-pulse'
                             : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {p.status === 'submitted' ? 'Selesai' : p.status === 'in_progress' ? 'Mengerjakan' : 'Terdaftar'}
+                          {p.status === 'submitted' ? 'Selesai' : p.status === 'in_progress' ? 'Ujian' : 'Siap'}
                         </span>
                       </td>
+
+                      {/* Aksi Hapus */}
                       <td className="py-3.5 px-4 text-center">
                         <button
                           onClick={() => handleDelete(p.participant_id)}
@@ -349,11 +546,14 @@ export const ParticipantsPage = () => {
               Petunjuk Kolom Template Excel (.xlsx):
             </h5>
             <p>
-              Pastikan kolom sesuai template: <code>No, Username, Password, Nama_Lengkap, Jenis_Kelamin, NIP_NIM, Asal_Madrasah_Sekolah</code>.
+              Pastikan kolom sesuai template: <code>No, Username, Password, Nama_Lengkap, Jenis_Kelamin, NIP_NIM, Kelas, Asal_Madrasah_Sekolah, Paket</code>.
+            </p>
+            <p className="text-emerald-800">
+              Kolom <strong>Kelas</strong> dan <strong>Paket</strong> (Pretest/Postest) akan langsung dipetakan ke sistem, dan <strong>Username & Password</strong> akan menjadi akun login resmi peserta!
             </p>
             <button
               onClick={downloadParticipantExcelTemplate}
-              className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block"
+              className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
             >
               Unduh Template Data Peserta (.xlsx) Di Sini
             </button>
@@ -387,16 +587,21 @@ export const ParticipantsPage = () => {
               </div>
               <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-2xl divide-y text-xs p-2 bg-slate-50">
                 {importPreview.map((item, idx) => (
-                  <div key={idx} className="p-2 flex items-center justify-between gap-3">
+                  <div key={idx} className="p-2.5 flex items-center justify-between gap-3">
                     <div>
-                      <span className="font-bold text-slate-800">#{idx + 1} {item.full_name}</span>
-                      <span className="text-slate-400 text-[11px] block">
-                        Username: {item.username} • {item.gender} • {item.institution}
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">#{idx + 1} {item.full_name}</span>
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                          {item.kelas || 'Kelas A'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">
+                          {item.paket || 'Pretest'}
+                        </span>
+                      </div>
+                      <span className="text-slate-400 text-[11px] block mt-0.5">
+                        User: <strong className="text-slate-700">{item.username}</strong> • Pass: <strong className="text-slate-700">{item.password || 'kemenag2026'}</strong> • {item.institution}
                       </span>
                     </div>
-                    <span className="font-mono text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      {item.password || 'kemenag2026'}
-                    </span>
                   </div>
                 ))}
               </div>
@@ -430,24 +635,25 @@ export const ParticipantsPage = () => {
         <form onSubmit={handleSaveParticipant} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Username Login</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Username Login (Admin)</label>
               <input
                 type="text"
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
                 placeholder="Contoh: guru_pai_05"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold"
                 required
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Password Login (Admin)</label>
               <input
                 type="text"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder="Default: kemenag2026"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold"
+                required
               />
             </div>
           </div>
@@ -459,9 +665,34 @@ export const ParticipantsPage = () => {
               value={form.full_name}
               onChange={(e) => setForm({ ...form, full_name: e.target.value })}
               placeholder="Contoh: Drs. H. Ahmad Fauzi, M.Pd"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium"
               required
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Kelas Peserta</label>
+              <input
+                type="text"
+                value={form.kelas}
+                onChange={(e) => setForm({ ...form, kelas: e.target.value })}
+                placeholder="Contoh: Kelas A / Kelas B"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Aksi: Paket Ujian</label>
+              <select
+                value={form.paket}
+                onChange={(e) => setForm({ ...form, paket: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-kemenag-800"
+              >
+                <option value="Pretest">Pretest</option>
+                <option value="Postest">Postest</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -477,7 +708,7 @@ export const ParticipantsPage = () => {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">NIP / NIM / NUPTK</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">NIP / NIM</label>
               <input
                 type="text"
                 value={form.identifier}
@@ -494,7 +725,7 @@ export const ParticipantsPage = () => {
               type="text"
               value={form.institution}
               onChange={(e) => setForm({ ...form, institution: e.target.value })}
-              placeholder="Contoh: MAN 1 Kota Jakarta / SDN 01"
+              placeholder="Contoh: MAN 1 Kota Jakarta / MTsN 2"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
             />
           </div>

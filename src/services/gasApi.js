@@ -33,6 +33,7 @@ function getMockDb() {
       {
         question_id: 'Q-1',
         session_id: 'SES-001',
+        paket: 'Pretest',
         type: 'single_choice',
         question_text: 'Apa kepanjangan dari CBT dalam sistem asesmen pendidikan modern?',
         image_url: '',
@@ -48,6 +49,7 @@ function getMockDb() {
       {
         question_id: 'Q-2',
         session_id: 'SES-001',
+        paket: 'Pretest',
         type: 'multiple_choice',
         question_text: 'Manakah dari komponen berikut yang termasuk dalam pilar arsitektur Serverless Google Workspace yang digunakan ExamPro? (Pilih semua yang benar)',
         image_url: '',
@@ -63,15 +65,72 @@ function getMockDb() {
       {
         question_id: 'Q-3',
         session_id: 'SES-001',
+        paket: 'Postest',
+        type: 'single_choice',
+        question_text: 'Dalam implementasi Kurikulum Merdeka PAI, prinsip asesmen autentik berorientasi pada pencapaian apa?',
+        image_url: '',
+        options: [
+          { id: 'A', text: 'Pencapaian nilai kognitif semata' },
+          { id: 'B', text: 'Profil Pelajar Pancasila & Rahmatan Lil Alamin' },
+          { id: 'C', text: 'Kelulusan ujian berbasis hafalan teks' },
+          { id: 'D', text: 'Standarisasi ujian tanpa diferensiasi' }
+        ],
+        key_answer: 'B',
+        weight: 1
+      },
+      {
+        question_id: 'Q-4',
+        session_id: 'SES-001',
+        paket: 'Postest',
         type: 'essay',
-        question_text: 'Jelaskan mengapa pemindahan kalkulasi skor dari sisi client (browser) ke sisi server (Google Apps Script) sangat krusial dalam menjamin integritas ujian online!',
+        question_text: 'Jelaskan bagaimana pendekatan pembelajaran berbasis STREAM dan AI dapat diintegrasikan dalam materi Fikih / Akidah Akhlak!',
         image_url: '',
         options: [],
-        key_answer: 'Rubrik: Keamanan kunci jawaban, pencegahan manipulasi DOM/Network DevTools.',
-        weight: 2
+        key_answer: 'Rubrik: Relevansi pedagogis, pemanfaatan alat digital etis, dan penguatan nilai-nilai Islam.',
+        weight: 3
       }
     ],
-    participants: [],
+    participants: [
+      {
+        participant_id: 'P-101',
+        session_id: 'SES-001',
+        username: 'guru_pai_01',
+        password: 'kemenag2026',
+        full_name: 'Drs. H. Ahmad Fauzi, M.Pd',
+        gender: 'Laki-Laki',
+        identifier: '198501012010121001',
+        kelas: 'Kelas A',
+        institution: 'MAN 1 Kota Jakarta',
+        paket: 'Pretest',
+        status: 'registered'
+      },
+      {
+        participant_id: 'P-102',
+        session_id: 'SES-001',
+        username: 'guru_pai_02',
+        password: 'kemenag2026',
+        full_name: 'Hj. Siti Nurhaliza, S.Ag',
+        gender: 'Perempuan',
+        identifier: '199002152015032002',
+        kelas: 'Kelas A',
+        institution: 'MTsN 2 Jakarta Selatan',
+        paket: 'Pretest',
+        status: 'registered'
+      },
+      {
+        participant_id: 'P-103',
+        session_id: 'SES-001',
+        username: 'guru_pai_03',
+        password: 'kemenag2026',
+        full_name: 'Muhammad Rasyid, M.Pd.I',
+        gender: 'Laki-Laki',
+        identifier: '198807122014021003',
+        kelas: 'Kelas B',
+        institution: 'SMAN 4 Jakarta Barat',
+        paket: 'Postest',
+        status: 'registered'
+      }
+    ],
     submissions: []
   };
   localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(initial));
@@ -88,6 +147,43 @@ export const gasApi = {
    */
   isConfigured: () => {
     return Boolean(GAS_API_URL && GAS_API_URL.startsWith('http') && !GAS_API_URL.includes('AKfycbx'));
+  },
+
+  /**
+   * Otentikasi Login Peserta berdasarkan Username & Password yang Ditentukan Admin
+   */
+  async participantLogin({ username, password }) {
+    if (!username || !password) throw new Error('Username dan password wajib diisi.');
+
+    if (!this.isConfigured()) {
+      await new Promise(r => setTimeout(r, 400));
+      const db = getMockDb();
+      const userClean = String(username).trim().toLowerCase();
+      const passClean = String(password).trim();
+
+      const found = db.participants.find(
+        p => String(p.username || '').trim().toLowerCase() === userClean &&
+             String(p.password || 'kemenag2026').trim() === passClean
+      );
+
+      if (found) {
+        return {
+          status: 'success',
+          participant: found
+        };
+      }
+
+      // Jika belum terdaftar tetapi format akun mirip demo, izinkan atau lempar error
+      throw new Error('Username atau Password salah! Pastikan data akun Anda sudah dibuat oleh Admin.');
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'participantLogin', username, password })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Login peserta gagal.');
+    return data;
   },
 
   /**
@@ -113,9 +209,9 @@ export const gasApi = {
   },
 
   /**
-   * Mulai Sesi Ujian (Registrasi Peserta)
+   * Mulai Sesi Ujian (Registrasi Peserta & Penentuan Paket)
    */
-  async startExam({ token, fullName, identifier, gender, sessionSalt }) {
+  async startExam({ token, fullName, identifier, gender, sessionSalt, paket, kelas }) {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 700));
       const db = getMockDb();
@@ -134,25 +230,42 @@ export const gasApi = {
       if (!sess) throw new Error('Token ujian tidak valid atau sudah kadaluarsa (token berganti setiap 1 menit)');
       if (!sess.is_active) throw new Error('Sesi ujian ini sedang dinonaktifkan');
 
-      const participantId = 'P-' + Date.now();
+      let existingPart = db.participants.find(
+        p => p.username === identifier || p.identifier === identifier
+      );
+      const participantId = existingPart?.participant_id || ('P-' + Date.now());
       const startTime = new Date().toISOString();
-      db.participants.push({
-        participant_id: participantId,
-        session_id: sess.session_id,
-        full_name: fullName,
-        identifier: identifier,
-        gender: gender || 'Laki-Laki',
-        token_used: token,
-        start_time: startTime,
-        status: 'in_progress'
-      });
+      const finalPaket = paket || existingPart?.paket || 'Pretest';
+      const finalKelas = kelas || existingPart?.kelas || 'Kelas A';
+
+      if (existingPart) {
+        existingPart.token_used = token;
+        existingPart.start_time = startTime;
+        existingPart.status = 'in_progress';
+        existingPart.paket = finalPaket;
+        existingPart.kelas = finalKelas;
+      } else {
+        db.participants.push({
+          participant_id: participantId,
+          session_id: sess.session_id,
+          username: identifier,
+          full_name: fullName,
+          identifier: identifier,
+          gender: gender || 'Laki-Laki',
+          kelas: finalKelas,
+          paket: finalPaket,
+          token_used: token,
+          start_time: startTime,
+          status: 'in_progress'
+        });
+      }
       saveMockDb(db);
-      return { status: 'success', participantId, startTime, session: sess };
+      return { status: 'success', participantId, startTime, session: sess, paket: finalPaket, kelas: finalKelas };
     }
 
     const response = await fetch(GAS_API_URL, {
       method: 'POST',
-      body: JSON.stringify({ action: 'startExam', token, fullName, identifier, gender, sessionSalt })
+      body: JSON.stringify({ action: 'startExam', token, fullName, identifier, gender, sessionSalt, paket, kelas })
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memulai ujian');
@@ -160,25 +273,32 @@ export const gasApi = {
   },
 
   /**
-   * Ambil Soal Ujian (Kunci Jawaban Disensor)
+   * Ambil Soal Ujian (Kunci Jawaban Disensor & Filter Berdasarkan Paket)
    */
-  async getExamQuestions(token, participantId) {
+  async getExamQuestions(token, participantId, paket) {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 800));
       const db = getMockDb();
-      const sess = db.sessions.find(s => s.token.toUpperCase() === token.trim().toUpperCase());
-      if (!sess) throw new Error('Sesi tidak ditemukan');
+      let sess = db.sessions[0];
+      const part = db.participants.find(p => p.participant_id === participantId);
+      const targetPaket = paket || part?.paket || 'Pretest';
 
-      const questions = db.questions.filter(q => q.session_id === sess.session_id).map(q => {
-        // Sensor kunci jawaban
+      let matched = db.questions.filter(
+        q => (q.paket || 'Pretest').toLowerCase() === targetPaket.toLowerCase()
+      );
+      if (matched.length === 0) {
+        matched = db.questions; // Fallback jika belum ada soal di paket tersebut
+      }
+
+      const questions = matched.map(q => {
         const { key_answer, ...safeQ } = q;
         return safeQ;
       });
 
-      return { status: 'success', session: sess, questions };
+      return { status: 'success', session: sess, questions, paket: targetPaket };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=getExamQuestions&token=${encodeURIComponent(token)}&participantId=${encodeURIComponent(participantId)}`);
+    const response = await fetch(`${GAS_API_URL}?action=getExamQuestions&token=${encodeURIComponent(token)}&participantId=${encodeURIComponent(participantId)}&paket=${encodeURIComponent(paket || '')}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat soal ujian');
     return data;

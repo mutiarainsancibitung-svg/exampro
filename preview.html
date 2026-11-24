@@ -191,6 +191,17 @@
                   <span class="text-sm font-semibold text-slate-800">sds</span>
                 </div>
 
+                <div class="grid grid-cols-2 gap-3 border-b border-slate-100 pb-2">
+                  <div>
+                    <span class="block text-[11px] font-semibold text-slate-500 uppercase">Kelas</span>
+                    <span class="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">Kelas A</span>
+                  </div>
+                  <div>
+                    <span class="block text-[11px] font-semibold text-slate-500 uppercase">Paket Ujian</span>
+                    <span class="text-xs font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">Pretest</span>
+                  </div>
+                </div>
+
                 <div class="border-b border-slate-100 pb-2">
                   <span class="block text-[11px] font-semibold text-slate-500 uppercase">Nama Peserta</span>
                   <span class="text-sm font-semibold text-slate-800">sds - PESERTA TKA</span>
@@ -382,19 +393,20 @@
       }
       const wb = XLSX.utils.book_new();
       if (type === 'soal') {
-        const headers = ['No', 'Jenis_Soal', 'Teks_Soal', 'Gambar_URL', 'Opsi_A', 'Opsi_B', 'Opsi_C', 'Opsi_D', 'Kunci_Jawaban', 'Bobot'];
+        const headers = ['No', 'Paket', 'Jenis_Soal', 'Teks_Soal', 'Gambar_URL', 'Opsi_A', 'Opsi_B', 'Opsi_C', 'Opsi_D', 'Kunci_Jawaban', 'Bobot'];
         const rows = [
-          [1, 'single_choice', 'Apa kepanjangan dari CBT dalam sistem asesmen pendidikan modern?', '', 'Computer-Based Test', 'Core Basic Technology', 'Cloud-Based Tracking', 'Central Binary Task', 'A', 1],
-          [2, 'essay', 'Jelaskan bagaimana pendekatan pembelajaran STREAM dan AI dalam materi PAI!', '', '', '', '', '', 'Rubrik Penilaian Pengajar', 3]
+          [1, 'Pretest', 'single_choice', 'Apa kepanjangan dari CBT dalam sistem asesmen pendidikan modern?', '', 'Computer-Based Test', 'Core Basic Technology', 'Cloud-Based Tracking', 'Central Binary Task', 'A', 1],
+          [2, 'Postest', 'essay', 'Jelaskan bagaimana pendekatan pembelajaran STREAM dan AI dalam materi PAI!', '', '', '', '', '', 'Rubrik Penilaian Pengajar', 3]
         ];
         const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
         XLSX.utils.book_append_sheet(wb, ws, 'Bank_Soal_PAI');
         XLSX.writeFile(wb, 'Template_Bank_Soal_ExamPro_PAI.xlsx');
       } else {
-        const headers = ['No', 'Username', 'Password', 'Nama_Lengkap', 'Jenis_Kelamin', 'NIP_NIM', 'Asal_Madrasah_Sekolah'];
+        const headers = ['No', 'Username', 'Password', 'Nama_Lengkap', 'Jenis_Kelamin', 'NIP_NIM', 'Kelas', 'Asal_Madrasah_Sekolah', 'Paket'];
         const rows = [
-          [1, 'guru_pai_01', 'kemenag2026', 'Drs. H. Ahmad Fauzi, M.Pd', 'Laki-Laki', '198501012010121001', 'MAN 1 Kota Jakarta'],
-          [2, 'guru_pai_02', 'kemenag2026', 'Hj. Siti Nurhaliza, S.Ag', 'Perempuan', '199002152015032002', 'MTsN 2 Jakarta Selatan']
+          [1, 'guru_pai_01', 'kemenag2026', 'Drs. H. Ahmad Fauzi, M.Pd', 'Laki-Laki', '198501012010121001', 'Kelas A', 'MAN 1 Kota Jakarta', 'Pretest'],
+          [2, 'guru_pai_02', 'kemenag2026', 'Hj. Siti Nurhaliza, S.Ag', 'Perempuan', '199002152015032002', 'Kelas A', 'MTsN 2 Jakarta Selatan', 'Pretest'],
+          [3, 'guru_pai_03', 'kemenag2026', 'Muhammad Rasyid, M.Pd.I', 'Laki-Laki', '198807122014021003', 'Kelas B', 'SMAN 4 Jakarta Barat', 'Postest']
         ];
         const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
         XLSX.utils.book_append_sheet(wb, ws, 'Data_Peserta');

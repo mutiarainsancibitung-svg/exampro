@@ -7,15 +7,14 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { downloadExcelTemplate, parseUploadedQuestionsFile } from '../../utils/excelTemplate';
-import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers } from 'lucide-react';
 
 export const QuestionBankPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
   const navigate = useNavigate();
 
   const [questions, setQuestions] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [selectedSession, setSelectedSession] = useState('');
+  const [selectedPaket, setSelectedPaket] = useState('SEMUA');
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
@@ -24,7 +23,7 @@ export const QuestionBankPage = () => {
   const [importError, setImportError] = useState('');
 
   const [form, setForm] = useState({
-    session_id: '',
+    paket: 'Pretest',
     type: 'single_choice',
     question_text: '',
     image_url: '',
@@ -51,11 +50,6 @@ export const QuestionBankPage = () => {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
         setQuestions(res.questions || []);
-        setSessions(res.sessions || []);
-        if (res.sessions.length > 0 && !selectedSession) {
-          setSelectedSession(res.sessions[0].session_id);
-          setForm(prev => ({ ...prev, session_id: res.sessions[0].session_id }));
-        }
       }
     } catch (err) {
       console.error(err);
@@ -86,7 +80,7 @@ export const QuestionBankPage = () => {
       await gasApi.saveQuestion(adminSecretKey, form);
       setShowModal(false);
       setForm({
-        session_id: selectedSession,
+        paket: selectedPaket !== 'SEMUA' ? selectedPaket : 'Pretest',
         type: 'single_choice',
         question_text: '',
         image_url: '',
@@ -105,7 +99,7 @@ export const QuestionBankPage = () => {
     }
   };
 
-  // Handler Pilih File Excel / CSV untuk Import
+  // Handler Pilih File Excel untuk Import
   const handleSelectExcelFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -121,18 +115,18 @@ export const QuestionBankPage = () => {
 
   // Eksekusi Batch Save Soal Hasil Import
   const handleExecuteImport = async () => {
-    if (importPreview.length === 0 || !selectedSession) return;
+    if (importPreview.length === 0) return;
     setImporting(true);
     try {
       for (const q of importPreview) {
         await gasApi.saveQuestion(adminSecretKey, {
           ...q,
-          session_id: selectedSession
+          paket: q.paket || 'Pretest'
         });
       }
       setShowImportModal(false);
       setImportPreview([]);
-      alert(`Berhasil mengimpor ${importPreview.length} butir soal ke sesi ini!`);
+      alert(`Berhasil mengimpor ${importPreview.length} butir soal ke Bank Soal!`);
       loadData();
     } catch (err) {
       alert('Gagal mengimpor soal: ' + err.message);
@@ -151,31 +145,70 @@ export const QuestionBankPage = () => {
     }
   };
 
-  const filteredQuestions = selectedSession
-    ? questions.filter(q => q.session_id === selectedSession)
-    : questions;
+  // Paket yang tersedia secara dinamis
+  const detectedPackages = Array.from(
+    new Set(questions.map(q => q.paket || 'Pretest').filter(Boolean))
+  );
+  // Pastikan selalu ada minimal Pretest dan Postest dalam daftar filter
+  const allPackages = Array.from(new Set(['Pretest', 'Postest', ...detectedPackages]));
+
+  // Filter soal berdasarkan paket yang sedang aktif
+  const filteredQuestions = selectedPaket === 'SEMUA'
+    ? questions
+    : questions.filter(q => (q.paket || 'Pretest').toLowerCase() === selectedPaket.toLowerCase());
 
   return (
     <AdminLayout title="Manajemen Bank Soal & Template Excel">
       <div className="space-y-6">
-        {/* Bar Filter Sesi & Tombol Aksi */}
+        {/* Bar Tombol Paket Ujian & Aksi Import */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm">
-          <div className="flex items-center gap-3">
-            <label className="text-xs font-bold text-slate-700">Pilih Sesi Ujian:</label>
-            <select
-              value={selectedSession}
-              onChange={(e) => {
-                setSelectedSession(e.target.value);
-                setForm(prev => ({ ...prev, session_id: e.target.value }));
-              }}
-              className="px-3.5 py-2 rounded-2xl border border-slate-200 text-sm bg-kemenag-50/50 font-medium text-slate-800"
+          {/* Tombol Tab Paket (Pretest, Postest, Dll) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1.5">
+              <Layers className="w-4 h-4 text-kemenag-600" />
+              Paket Soal:
+            </span>
+
+            {/* Tombol Semua */}
+            <button
+              onClick={() => setSelectedPaket('SEMUA')}
+              className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-2 ${
+                selectedPaket === 'SEMUA'
+                  ? 'bg-kemenag-600 text-white shadow-sm shadow-kemenag-300'
+                  : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-kemenag-50 hover:text-kemenag-800'
+              }`}
             >
-              {sessions.map(s => (
-                <option key={s.session_id} value={s.session_id}>
-                  {s.title} ({s.token})
-                </option>
-              ))}
-            </select>
+              <span>Semua Paket</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                selectedPaket === 'SEMUA' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {questions.length}
+              </span>
+            </button>
+
+            {/* Tombol Tiap Paket (Pretest, Postest, dll) */}
+            {allPackages.map(pkt => {
+              const count = questions.filter(q => (q.paket || 'Pretest').toLowerCase() === pkt.toLowerCase()).length;
+              const isActive = selectedPaket.toLowerCase() === pkt.toLowerCase();
+              return (
+                <button
+                  key={pkt}
+                  onClick={() => setSelectedPaket(pkt)}
+                  className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-2 ${
+                    isActive
+                      ? 'bg-kemenag-600 text-white shadow-sm shadow-kemenag-300'
+                      : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-kemenag-50 hover:text-kemenag-800'
+                  }`}
+                >
+                  <span>{pkt}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Tombol Aksi Excel & Tambah Soal */}
@@ -212,26 +245,46 @@ export const QuestionBankPage = () => {
               variant="primary"
               size="sm"
               icon={Plus}
-              onClick={() => setShowModal(true)}
+              onClick={() => {
+                setForm(prev => ({
+                  ...prev,
+                  paket: selectedPaket !== 'SEMUA' ? selectedPaket : 'Pretest'
+                }));
+                setShowModal(true);
+              }}
             >
               Tambah Soal
             </Button>
           </div>
         </div>
 
-        {/* List Soal */}
+        {/* List Soal Sesuai Paket yang Diklik */}
         <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Menampilkan {filteredQuestions.length} Soal untuk Paket: <span className="text-kemenag-700 font-extrabold">{selectedPaket}</span>
+            </h4>
+          </div>
+
           {filteredQuestions.length === 0 ? (
             <Card className="p-10 text-center text-slate-500 text-sm bg-white rounded-3xl border border-kemenag-100">
-              Belum ada soal pada sesi ini. Anda dapat mengklik <strong>Download Template Excel</strong> lalu mengisinya dan mengunggah kembali via <strong>Import dari Excel</strong>.
+              Belum ada soal untuk paket <strong>{selectedPaket}</strong>. Anda dapat mengklik <strong>Download Template Excel (.xlsx)</strong> lalu mengisi kolom <code>Paket</code> dengan <strong>{selectedPaket}</strong> dan mengunggahnya via <strong>Import dari Excel</strong>.
             </Card>
           ) : (
             filteredQuestions.map((q, idx) => (
-              <Card key={q.question_id} className="p-6 space-y-3 bg-white rounded-3xl border border-kemenag-100 shadow-sm">
+              <Card key={q.question_id || idx} className="p-6 space-y-3 bg-white rounded-3xl border border-kemenag-100 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="w-8 h-8 rounded-xl bg-kemenag-600 text-white font-extrabold text-xs flex items-center justify-center">
                       {idx + 1}
+                    </span>
+                    {/* Badge Paket */}
+                    <span className={`text-xs font-bold px-3 py-1 rounded-xl uppercase tracking-wider border ${
+                      (q.paket || 'Pretest').toLowerCase().includes('post')
+                        ? 'bg-purple-100 text-purple-900 border-purple-200'
+                        : 'bg-amber-100 text-amber-900 border-amber-200'
+                    }`}>
+                      Paket: {q.paket || 'Pretest'}
                     </span>
                     <span className="text-xs font-semibold px-2.5 py-1 rounded-xl bg-kemenag-50 text-kemenag-700 border border-kemenag-200 uppercase">
                       {q.type}
@@ -257,7 +310,20 @@ export const QuestionBankPage = () => {
                   <img src={q.image_url} alt="Media" className="max-h-44 rounded-2xl border object-contain" />
                 )}
 
-                {/* Info Kunci Jawaban */}
+                {/* Info Opsi & Kunci Jawaban */}
+                {q.options && q.options.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs">
+                    {q.options.map(opt => (
+                      <div key={opt.id} className="p-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2">
+                        <span className="font-bold text-slate-700 w-5 h-5 rounded-lg bg-white flex items-center justify-center border text-[11px]">
+                          {opt.id}
+                        </span>
+                        <span className="text-slate-800">{opt.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="pt-2 text-xs text-slate-600">
                   <strong>Kunci Jawaban:</strong>{' '}
                   <span className="font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-lg">
@@ -281,16 +347,19 @@ export const QuestionBankPage = () => {
           <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1.5">
             <h5 className="font-bold flex items-center gap-1.5">
               <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              Petunjuk Format Excel (.xlsx):
+              Petunjuk Format Kolom Excel (.xlsx):
             </h5>
             <p>
-              Pastikan kolom sesuai template: <code>No, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Kunci_Jawaban, Bobot</code>.
+              Kolom template: <code>No, Paket, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Kunci_Jawaban, Bobot</code>.
+            </p>
+            <p className="text-emerald-800">
+              Isi kolom <strong>Paket</strong> dengan <strong>Pretest</strong> atau <strong>Postest</strong>. Soal akan otomatis terkelompokkan ke dalam paket masing-masing saat diimpor!
             </p>
             <button
               onClick={downloadExcelTemplate}
-              className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block"
+              className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
             >
-              Unduh Template Contoh Di Sini (.xlsx)
+              Unduh Template Bank Soal Di Sini (.xlsx)
             </button>
           </div>
 
@@ -323,8 +392,11 @@ export const QuestionBankPage = () => {
               <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-2xl divide-y text-xs p-2 bg-slate-50">
                 {importPreview.map((item, idx) => (
                   <div key={idx} className="p-2 space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-slate-800">#{idx + 1}</span>
+                      <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px] uppercase">
+                        {item.paket || 'Pretest'}
+                      </span>
                       <span className="px-1.5 py-0.5 rounded bg-slate-200 uppercase font-semibold text-[10px]">
                         {item.type}
                       </span>
@@ -362,7 +434,18 @@ export const QuestionBankPage = () => {
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleSaveQuestion} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Paket Ujian</label>
+              <input
+                type="text"
+                value={form.paket}
+                onChange={(e) => setForm({ ...form, paket: e.target.value })}
+                placeholder="Pretest / Postest"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-kemenag-800"
+                required
+              />
+            </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tipe Soal</label>
               <select
