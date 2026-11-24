@@ -8,7 +8,7 @@ import { validateRotatingToken } from '../utils/rotatingToken';
 const GAS_API_URL = import.meta.env.VITE_GAS_API_URL || '';
 
 // Mock database in-memory untuk pengujian lokal jika GAS URL belum diisi
-const MOCK_STORAGE_KEY = 'exampro_mock_db';
+const MOCK_STORAGE_KEY = 'exampro_mock_db_v4';
 function getMockDb() {
   const existing = localStorage.getItem(MOCK_STORAGE_KEY);
   if (existing) {
@@ -18,10 +18,10 @@ function getMockDb() {
     sessions: [
       {
         session_id: 'SES-001',
-        title: 'Pretest Pelatihan TOT: Literasi Digital & Asesmen',
-        type: 'pretest',
+        title: 'Pelatihan Guru PAI: Penguatan Kompetensi & Digital',
+        type: 'evaluasi',
         token: 'TOT2026',
-        duration_minutes: 30,
+        duration_minutes: 60,
         is_active: true,
         shuffle_questions: true,
         shuffle_options: true,
@@ -29,108 +29,8 @@ function getMockDb() {
         created_at: new Date().toISOString()
       }
     ],
-    questions: [
-      {
-        question_id: 'Q-1',
-        session_id: 'SES-001',
-        paket: 'Pretest',
-        type: 'single_choice',
-        question_text: 'Apa kepanjangan dari CBT dalam sistem asesmen pendidikan modern?',
-        image_url: '',
-        options: [
-          { id: 'A', text: 'Computer-Based Test' },
-          { id: 'B', text: 'Core Basic Technology' },
-          { id: 'C', text: 'Cloud-Based Tracking' },
-          { id: 'D', text: 'Central Binary Task' }
-        ],
-        key_answer: 'A',
-        weight: 1
-      },
-      {
-        question_id: 'Q-2',
-        session_id: 'SES-001',
-        paket: 'Pretest',
-        type: 'multiple_choice',
-        question_text: 'Manakah dari komponen berikut yang termasuk dalam pilar arsitektur Serverless Google Workspace yang digunakan ExamPro? (Pilih semua yang benar)',
-        image_url: '',
-        options: [
-          { id: 'A', text: 'Google Apps Script (GAS)' },
-          { id: 'B', text: 'Google Sheets (Relational Spreadsheet)' },
-          { id: 'C', text: 'Google Drive (Cloud Asset Storage)' },
-          { id: 'D', text: 'Kubernetes Cluster On-Premise' }
-        ],
-        key_answer: 'A,B,C',
-        weight: 1
-      },
-      {
-        question_id: 'Q-3',
-        session_id: 'SES-001',
-        paket: 'Postest',
-        type: 'single_choice',
-        question_text: 'Dalam implementasi Kurikulum Merdeka PAI, prinsip asesmen autentik berorientasi pada pencapaian apa?',
-        image_url: '',
-        options: [
-          { id: 'A', text: 'Pencapaian nilai kognitif semata' },
-          { id: 'B', text: 'Profil Pelajar Pancasila & Rahmatan Lil Alamin' },
-          { id: 'C', text: 'Kelulusan ujian berbasis hafalan teks' },
-          { id: 'D', text: 'Standarisasi ujian tanpa diferensiasi' }
-        ],
-        key_answer: 'B',
-        weight: 1
-      },
-      {
-        question_id: 'Q-4',
-        session_id: 'SES-001',
-        paket: 'Postest',
-        type: 'essay',
-        question_text: 'Jelaskan bagaimana pendekatan pembelajaran berbasis STREAM dan AI dapat diintegrasikan dalam materi Fikih / Akidah Akhlak!',
-        image_url: '',
-        options: [],
-        key_answer: 'Rubrik: Relevansi pedagogis, pemanfaatan alat digital etis, dan penguatan nilai-nilai Islam.',
-        weight: 3
-      }
-    ],
-    participants: [
-      {
-        participant_id: 'P-101',
-        session_id: 'SES-001',
-        username: 'guru_pai_01',
-        password: 'kemenag2026',
-        full_name: 'Drs. H. Ahmad Fauzi, M.Pd',
-        gender: 'Laki-Laki',
-        identifier: '198501012010121001',
-        kelas: 'Kelas A',
-        institution: 'MAN 1 Kota Jakarta',
-        paket: 'Pretest',
-        status: 'registered'
-      },
-      {
-        participant_id: 'P-102',
-        session_id: 'SES-001',
-        username: 'guru_pai_02',
-        password: 'kemenag2026',
-        full_name: 'Hj. Siti Nurhaliza, S.Ag',
-        gender: 'Perempuan',
-        identifier: '199002152015032002',
-        kelas: 'Kelas A',
-        institution: 'MTsN 2 Jakarta Selatan',
-        paket: 'Pretest',
-        status: 'registered'
-      },
-      {
-        participant_id: 'P-103',
-        session_id: 'SES-001',
-        username: 'guru_pai_03',
-        password: 'kemenag2026',
-        full_name: 'Muhammad Rasyid, M.Pd.I',
-        gender: 'Laki-Laki',
-        identifier: '198807122014021003',
-        kelas: 'Kelas B',
-        institution: 'SMAN 4 Jakarta Barat',
-        paket: 'Postest',
-        status: 'registered'
-      }
-    ],
+    questions: [],
+    participants: [],
     submissions: []
   };
   localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(initial));

@@ -23,7 +23,7 @@ export const QuestionBankPage = () => {
   const [importError, setImportError] = useState('');
 
   const [form, setForm] = useState({
-    paket: 'Pretest',
+    paket: '',
     type: 'single_choice',
     question_text: '',
     image_url: '',
@@ -145,17 +145,15 @@ export const QuestionBankPage = () => {
     }
   };
 
-  // Paket yang tersedia secara dinamis
-  const detectedPackages = Array.from(
-    new Set(questions.map(q => q.paket || 'Pretest').filter(Boolean))
+  // Paket yang tersedia murni dibaca dari data soal yang diinput/diimpor
+  const allPackages = Array.from(
+    new Set(questions.map(q => q.paket?.trim()).filter(Boolean))
   );
-  // Pastikan selalu ada minimal Pretest dan Postest dalam daftar filter
-  const allPackages = Array.from(new Set(['Pretest', 'Postest', ...detectedPackages]));
 
   // Filter soal berdasarkan paket yang sedang aktif
   const filteredQuestions = selectedPaket === 'SEMUA'
     ? questions
-    : questions.filter(q => (q.paket || 'Pretest').toLowerCase() === selectedPaket.toLowerCase());
+    : questions.filter(q => (q.paket || '').toLowerCase() === selectedPaket.toLowerCase());
 
   return (
     <AdminLayout title="Manajemen Bank Soal & Template Excel">
@@ -436,15 +434,19 @@ export const QuestionBankPage = () => {
         <form onSubmit={handleSaveQuestion} className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Paket Ujian</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Paket / Tugas</label>
               <input
                 type="text"
+                list="dynamic-pkts-bank"
                 value={form.paket}
                 onChange={(e) => setForm({ ...form, paket: e.target.value })}
-                placeholder="Pretest / Postest"
+                placeholder="Ketik/Pilih Paket..."
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-kemenag-800"
                 required
               />
+              <datalist id="dynamic-pkts-bank">
+                {allPackages.map(p => <option key={p} value={p} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tipe Soal</label>
