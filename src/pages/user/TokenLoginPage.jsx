@@ -5,8 +5,9 @@ import { gasApi } from '../../services/gasApi';
 import { HeaderBar } from '../../components/layout/HeaderBar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { getMinuteRotatingToken, getSecondsRemainingInCurrentMinute } from '../../utils/rotatingToken';
-import { User, Lock, Eye, EyeOff, RotateCw, AlertCircle, Sparkles, Clock } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, RotateCw, AlertCircle, Clock } from 'lucide-react';
 
 export const TokenLoginPage = () => {
   const navigate = useNavigate();
@@ -160,20 +161,17 @@ export const TokenLoginPage = () => {
     }
   };
 
-  // Quick Demo Autofill
-  const fillDemoAccount = () => {
-    setUsername('guru_pai_01');
-    setPassword('kemenag2026');
-    setConfirmFullName('Drs. H. Ahmad Fauzi, M.Pd');
-    setGender('Laki-Laki');
-    setUserKelas('Kelas A');
-    setUserPaket('Pretest');
-    setTokenInput(rotatingToken);
-    setError('');
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-mint-grid">
+      {/* Loading Overlay saat memverifikasi atau menyiapkan ujian */}
+      {loading && (
+        <LoadingScreen
+          fullScreen
+          message={stage === 1 ? 'Memverifikasi Akun Peserta...' : 'Menyiapkan Lembar Soal Ujian...'}
+          submessage="Sedang memeriksa kredensial dan mengalokasikan paket soal CBT Anda..."
+        />
+      )}
+
       {/* Header Bar dengan Logo Asli Kemenag RI & UIN Jakarta */}
       <HeaderBar
         participantInfo={stage === 2 ? { username, fullName: confirmFullName } : null}
@@ -249,21 +247,15 @@ export const TokenLoginPage = () => {
                 </Button>
               </form>
 
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  onClick={fillDemoAccount}
-                  className="inline-flex items-center gap-1.5 text-kemenag-700 hover:text-kemenag-900 font-semibold"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  Isi Akun Demo Otomatis
-                </button>
-
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <span className="text-[11px] text-slate-400">
+                  Pastikan akun Anda sudah didaftarkan oleh panitia
+                </span>
                 <a
                   href="/admin/login"
-                  className="text-slate-400 hover:text-kemenag-700 font-medium transition"
+                  className="text-slate-500 hover:text-kemenag-700 font-semibold transition"
                 >
-                  Panel Pengajar &rarr;
+                  Panel Admin &rarr;
                 </a>
               </div>
             </Card>

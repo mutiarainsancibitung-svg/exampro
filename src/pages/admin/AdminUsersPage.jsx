@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import {
   ShieldCheck,
   UserPlus,
@@ -29,6 +30,7 @@ export const AdminUsersPage = () => {
   const navigate = useNavigate();
 
   const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('ALL');
 
@@ -54,6 +56,7 @@ export const AdminUsersPage = () => {
   }, [isAdminLoggedIn, navigate]);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
@@ -61,6 +64,8 @@ export const AdminUsersPage = () => {
       }
     } catch (err) {
       console.error('Gagal memuat data admin:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -191,6 +196,17 @@ export const AdminUsersPage = () => {
     const matchRole = filterRole === 'ALL' || a.role === filterRole;
     return matchSearch && matchRole;
   });
+
+  if (loading) {
+    return (
+      <AdminLayout title="Manajemen Pengguna Admin & Hak Akses (Role)">
+        <LoadingScreen
+          message="Memuat Pengguna Admin..."
+          submessage="Sedang mengambil data akun staf, penguji, dan konfigurasi hak akses..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Manajemen Pengguna Admin & Hak Akses (Role)">

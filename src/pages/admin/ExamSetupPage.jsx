@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import {
   Sliders,
   BookOpen,
@@ -285,6 +286,17 @@ export const ExamSetupPage = () => {
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
+
+  if (loading) {
+    return (
+      <AdminLayout title="Atur Ujian: Mata Ujian, Bank Soal & Pemetaan Kelas">
+        <LoadingScreen
+          message="Menyiapkan Atur Ujian & Pemetaan..."
+          submessage="Sedang mengambil data mata ujian, paket bank soal, dan daftar kelas peserta..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Atur Ujian: Mata Ujian, Bank Soal & Pemetaan Kelas">

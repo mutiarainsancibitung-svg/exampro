@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import {
   downloadParticipantExcelTemplate,
   parseUploadedParticipantFile
@@ -34,6 +35,7 @@ export const ParticipantsPage = () => {
   const navigate = useNavigate();
 
   const [participants, setParticipants] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterGender, setFilterGender] = useState('ALL');
@@ -70,6 +72,7 @@ export const ParticipantsPage = () => {
   }, [isAdminLoggedIn, navigate]);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
@@ -77,20 +80,11 @@ export const ParticipantsPage = () => {
         const qList = res.questions || [];
         setParticipants(parts);
         setQuestions(qList);
-
-        // Set default bulk class jika ada
-        const detectedCls = Array.from(new Set(parts.map(p => p.kelas?.trim()).filter(Boolean)));
-        if (detectedCls.length > 0 && !bulkClass) {
-          setBulkClass(detectedCls[0]);
-        }
-        // Set default bulk package dari paket yang terdeteksi
-        const detectedPkg = Array.from(new Set([...qList.map(q => q.paket?.trim()), ...parts.map(p => p.paket?.trim())].filter(Boolean)));
-        if (detectedPkg.length > 0 && !bulkPackage) {
-          setBulkPackage(detectedPkg[0]);
-        }
       }
     } catch (err) {
       console.error('Gagal memuat data peserta:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -234,6 +228,17 @@ export const ParticipantsPage = () => {
 
     return matchSearch && matchGender && matchKelas && matchPaket;
   });
+
+  if (loading) {
+    return (
+      <AdminLayout title="Data & Kelola Akun Peserta Ujian">
+        <LoadingScreen
+          message="Memuat Data Peserta Ujian..."
+          submessage="Sedang mengambil data peserta terdaftar, pembagian kelas, dan status..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Data & Kelola Akun Peserta Ujian">

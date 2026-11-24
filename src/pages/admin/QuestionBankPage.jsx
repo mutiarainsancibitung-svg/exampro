@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { downloadExcelTemplate, parseUploadedQuestionsFile } from '../../utils/excelTemplate';
 import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers } from 'lucide-react';
 
@@ -14,6 +15,7 @@ export const QuestionBankPage = () => {
   const navigate = useNavigate();
 
   const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedPaket, setSelectedPaket] = useState('SEMUA');
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -46,6 +48,7 @@ export const QuestionBankPage = () => {
   }, [isAdminLoggedIn, navigate]);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
@@ -53,6 +56,8 @@ export const QuestionBankPage = () => {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -154,6 +159,17 @@ export const QuestionBankPage = () => {
   const filteredQuestions = selectedPaket === 'SEMUA'
     ? questions
     : questions.filter(q => (q.paket || '').toLowerCase() === selectedPaket.toLowerCase());
+
+  if (loading) {
+    return (
+      <AdminLayout title="Manajemen Bank Soal & Template Excel">
+        <LoadingScreen
+          message="Memuat Bank Soal..."
+          submessage="Sedang mengambil data butir soal, opsi pilihan ganda, dan kunci jawaban..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Manajemen Bank Soal & Template Excel">

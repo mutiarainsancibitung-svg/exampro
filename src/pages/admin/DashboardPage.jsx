@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database } from 'lucide-react';
 
 export const DashboardPage = () => {
@@ -104,6 +105,17 @@ export const DashboardPage = () => {
     { label: 'Peserta Terdaftar', value: data.participants.length, icon: Users, color: 'text-blue-700 bg-blue-50', link: '/admin/participants' },
     { label: 'Lembar Terkumpul', value: data.submissions.length, icon: CheckCircle2, color: 'text-purple-700 bg-purple-50', link: '/admin/results' },
   ];
+
+  if (loading) {
+    return (
+      <AdminLayout title="Dashboard & Manajemen Sesi Evaluasi PAI">
+        <LoadingScreen
+          message="Menyiapkan Dashboard Admin..."
+          submessage="Sedang mengambil data sesi evaluasi, bank soal, dan keaktifan peserta..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Dashboard & Manajemen Sesi Evaluasi PAI">

@@ -5,7 +5,8 @@ import { gasApi } from '../../services/gasApi';
 import { HeaderBar } from '../../components/layout/HeaderBar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Lock, User, ShieldCheck, Sparkles, ArrowLeft, AlertCircle, KeyRound, Eye, EyeOff, GraduationCap, Eye as EyeIcon } from 'lucide-react';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
+import { Lock, User, ShieldCheck, ArrowLeft, AlertCircle, KeyRound, Eye, EyeOff } from 'lucide-react';
 
 export const AdminLoginPage = () => {
   const navigate = useNavigate();
@@ -55,15 +56,17 @@ export const AdminLoginPage = () => {
     }
   };
 
-  const fillAccount = (u, p) => {
-    setLoginMode('account');
-    setUsername(u);
-    setPassword(p);
-    setError('');
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-mint-grid">
+      {/* Loading Overlay saat memverifikasi kredensial */}
+      {loading && (
+        <LoadingScreen
+          fullScreen
+          message="Memverifikasi Akses Admin..."
+          submessage="Sedang memeriksa hak akses dan kredensial Anda di server FITK UIN Jakarta..."
+        />
+      )}
+
       <HeaderBar />
 
       <main className="flex-1 flex items-center justify-center p-4 my-auto">
@@ -188,54 +191,17 @@ export const AdminLoginPage = () => {
               </Button>
             </form>
 
-            {/* Quick Demo Role Logins */}
-            <div className="pt-3 border-t border-slate-100 space-y-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block text-center">
-                Pilih Akun Demo Cepat:
+            {/* Catatan Keamanan Panel Admin */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span className="text-[11px] text-slate-400">
+                Akses khusus staf penguji & panitia FITK
               </span>
-              <div className="grid grid-cols-1 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => fillAccount('admin', 'admin123')}
-                  className="flex items-center justify-between p-2 rounded-xl border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-50 text-emerald-900 text-xs font-semibold transition"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                    <strong>Super Admin:</strong> @admin
-                  </span>
-                  <span className="text-[10px] bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-lg font-bold">
-                    admin123
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fillAccount('dosen_pai', 'dosen123')}
-                  className="flex items-center justify-between p-2 rounded-xl border border-blue-200 bg-blue-50/60 hover:bg-blue-50 text-blue-900 text-xs font-semibold transition"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <GraduationCap className="w-4 h-4 text-blue-700" />
-                    <strong>Pengajar / Dosen:</strong> @dosen_pai
-                  </span>
-                  <span className="text-[10px] bg-blue-200/80 text-blue-900 px-2 py-0.5 rounded-lg font-bold">
-                    dosen123
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fillAccount('pengawas01', 'awas123')}
-                  className="flex items-center justify-between p-2 rounded-xl border border-purple-200 bg-purple-50/60 hover:bg-purple-50 text-purple-900 text-xs font-semibold transition"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <EyeIcon className="w-4 h-4 text-purple-700" />
-                    <strong>Pengawas Ujian:</strong> @pengawas01
-                  </span>
-                  <span className="text-[10px] bg-purple-200/80 text-purple-900 px-2 py-0.5 rounded-lg font-bold">
-                    awas123
-                  </span>
-                </button>
-              </div>
+              <a
+                href="/"
+                className="text-slate-500 hover:text-kemenag-700 font-semibold transition"
+              >
+                &larr; Masuk Peserta
+              </a>
             </div>
           </Card>
 

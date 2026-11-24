@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { Award, AlertTriangle, Eye, Check } from 'lucide-react';
 
 export const ResultsPage = () => {
@@ -13,6 +14,7 @@ export const ResultsPage = () => {
   const navigate = useNavigate();
 
   const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [participants, setParticipants] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -29,6 +31,7 @@ export const ResultsPage = () => {
   }, [isAdminLoggedIn, navigate]);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey);
       if (res.status === 'success') {
@@ -42,6 +45,8 @@ export const ResultsPage = () => {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,6 +80,17 @@ export const ResultsPage = () => {
   const filtered = selectedSession
     ? enrichedSubmissions.filter(s => s.session_id === selectedSession)
     : enrichedSubmissions;
+
+  if (loading) {
+    return (
+      <AdminLayout title="Rekapitulasi Nilai & Penilaian Essay">
+        <LoadingScreen
+          message="Memuat Rekapitulasi Nilai Peserta..."
+          submessage="Sedang mengambil lembar jawaban peserta dan kalkulasi skor..."
+        />
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout title="Rekapitulasi Nilai & Penilaian Essay">

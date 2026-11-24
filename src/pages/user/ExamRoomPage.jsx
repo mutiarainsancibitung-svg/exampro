@@ -11,6 +11,7 @@ import { TimerDisplay } from '../../components/exam/TimerDisplay';
 import { ViolationModal } from '../../components/exam/ViolationModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2 } from 'lucide-react';
 
 export const ExamRoomPage = () => {
@@ -87,12 +88,23 @@ export const ExamRoomPage = () => {
     }
   };
 
+  if (submitting) {
+    return (
+      <LoadingScreen
+        fullScreen
+        message="Mengirim & Memproses Jawaban Ujian..."
+        submessage="Jawaban Anda sedang diverifikasi dan disimpan dengan aman ke database Google Sheets..."
+      />
+    );
+  }
+
   if (loading || !currentQuestion) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-mint-grid">
-        <div className="w-12 h-12 border-4 border-kemenag-600 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-semibold text-kemenag-800">Menyiapkan Lembar Ujian Pelatihan Guru PAI...</p>
-      </div>
+      <LoadingScreen
+        fullScreen
+        message="Menyiapkan Lembar Ujian Pelatihan Guru PAI..."
+        submessage="Sedang mengunduh butir soal, opsi jawaban, dan menyinkronkan pengawas waktu ujian..."
+      />
     );
   }
 

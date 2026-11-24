@@ -366,7 +366,7 @@ export const gasApi = {
         };
         return { status: 'success', secretKey: pin, user: defaultAdmin, message: 'Login Admin Berhasil' };
       }
-      throw new Error('Kredensial Admin salah (Default demo: admin / admin123)');
+      throw new Error('Kredensial atau PIN Admin salah.');
     }
 
     const payload = typeof param === 'object' && param !== null
