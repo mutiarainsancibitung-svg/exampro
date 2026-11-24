@@ -28,7 +28,7 @@ Backend ExamPro menggunakan Google Apps Script (GAS) yang terhubung langsung ke 
 
 ---
 
-## Langkah 4: Inisialisasi Database (Setup 4 Sheet)
+## Langkah 4: Inisialisasi Database (Setup 5 Sheet)
 1. Kembali ke editor kode (`Code.gs`).
 2. Di dropdown fungsi bagian atas (di samping tombol *Debug*), pilih fungsi **`setupDatabaseSheets`**.
 3. Klik tombol **Run (Jalankan)**.
@@ -36,11 +36,12 @@ Backend ExamPro menggunakan Google Apps Script (GAS) yang terhubung langsung ke 
    * Pilih akun Google Anda.
    * Klik **Advanced (Lanjutan)** > **Go to ExamPro Backend API (unsafe)**.
    * Klik **Allow (Izinkan)**.
-5. Setelah selesai dijalankan, buka kembali tab Google Sheets Anda. Anda akan melihat 4 sheet telah otomatis dibuat dengan header yang rapi:
+5. Setelah selesai dijalankan, buka kembali tab Google Sheets Anda. Anda akan melihat 5 sheet telah otomatis dibuat dengan header yang rapi:
    - `Sessions`
    - `Questions`
    - `Participants`
    - `Submissions`
+   - `Admins` (Untuk manajemen akun Super Admin, Pengajar, dan Pengawas)
 
 ---
 
@@ -48,12 +49,24 @@ Backend ExamPro menggunakan Google Apps Script (GAS) yang terhubung langsung ke 
 1. Di pojok kanan atas Apps Script, klik tombol biru **Deploy** > **New deployment**.
 2. Klik ikon gerigi ⚙️ di sebelah *Select type*, lalu pilih **Web app**.
 3. Isi konfigurasi berikut:
-   * **Description:** `ExamPro API v2`
+   * **Description:** `ExamPro API v2.5 with RBAC Admins`
    * **Execute as:** `Me (email-anda@gmail.com)` *(Wajib pilih ini)*
    * **Who has access:** `Anyone` *(Wajib pilih ini agar peserta & web app bisa akses tanpa login Google)*
 4. Klik **Deploy**.
 5. Salin **Web app URL** yang berakhiran `/exec` (misal: `https://script.google.com/macros/s/AKfycbx.../exec`).
 6. Simpan URL ini, karena akan dimasukkan ke variabel environment frontend (`VITE_GAS_API_URL`).
+
+---
+
+## Cara Memperbarui Kode (Jika Sebelumnya Sudah Deploy)
+Jika Anda sebelumnya sudah pernah men-deploy Google Apps Script dan ingin memperbarui dengan fitur terbaru (Role Admin & Sheet `Admins`):
+1. Buka Apps Script Anda di Google Sheets (**Extensions > Apps Script**).
+2. Ganti seluruh isi `Code.gs` dengan kode terbaru dari file `gas/Code.gs`.
+3. Jalankan fungsi **`initializeDefaultAdmins`** atau **`setupDatabaseSheets`** (pilih di dropdown fungsi lalu klik **Run**) agar sheet `Admins` otomatis terbuat beserta 3 akun default.
+4. Klik tombol **Deploy** di pojok kanan atas > pilih **Manage deployments**.
+5. Klik ikon **Edit (pensil ✏️)** pada deployment Web App yang aktif.
+6. Pada bagian *Version*, ubah menjadi **New version** (Versi baru).
+7. Klik **Deploy** dan klik **Done**. URL Web App Anda tetap sama dan tidak perlu diubah di frontend!
 
 ---
 
