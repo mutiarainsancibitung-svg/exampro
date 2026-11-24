@@ -82,10 +82,10 @@ export const DashboardPage = () => {
   };
 
   const stats = [
-    { label: 'Total Sesi Evaluasi', value: data.sessions.length, icon: FileText, color: 'text-kemenag-700 bg-kemenag-50' },
-    { label: 'Bank Soal PAI', value: data.questions.length, icon: BookOpen, color: 'text-emerald-700 bg-emerald-50' },
-    { label: 'Peserta Terdaftar', value: data.participants.length, icon: Users, color: 'text-blue-700 bg-blue-50' },
-    { label: 'Lembar Terkumpul', value: data.submissions.length, icon: CheckCircle2, color: 'text-purple-700 bg-purple-50' },
+    { label: 'Total Sesi Evaluasi', value: data.sessions.length, icon: FileText, color: 'text-kemenag-700 bg-kemenag-50', link: null },
+    { label: 'Bank Soal PAI', value: data.questions.length, icon: BookOpen, color: 'text-emerald-700 bg-emerald-50', link: '/admin/questions' },
+    { label: 'Peserta Terdaftar', value: data.participants.length, icon: Users, color: 'text-blue-700 bg-blue-50', link: '/admin/participants' },
+    { label: 'Lembar Terkumpul', value: data.submissions.length, icon: CheckCircle2, color: 'text-purple-700 bg-purple-50', link: '/admin/results' },
   ];
 
   return (
@@ -94,7 +94,13 @@ export const DashboardPage = () => {
         {/* Ringkasan Statistik */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((st, i) => (
-            <Card key={i} className="p-6 flex items-center gap-4 bg-white rounded-3xl border border-kemenag-100 shadow-sm">
+            <Card
+              key={i}
+              onClick={() => st.link && navigate(st.link)}
+              className={`p-6 flex items-center gap-4 bg-white rounded-3xl border border-kemenag-100 shadow-sm transition ${
+                st.link ? 'cursor-pointer hover:shadow-md hover:border-kemenag-300' : ''
+              }`}
+            >
               <div className={`p-3.5 rounded-2xl ${st.color}`}>
                 <st.icon className="w-6 h-6" />
               </div>
@@ -108,19 +114,30 @@ export const DashboardPage = () => {
 
         {/* Daftar Sesi Ujian */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-slate-800 text-base">Daftar Sesi Ujian (Pretest & Postest)</h3>
               <p className="text-xs text-slate-500">Kelola token masuk, durasi pengerjaan, dan status ujian.</p>
             </div>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setShowSessionModal(true)}
-            >
-              Tambah Sesi Baru
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Users}
+                onClick={() => navigate('/admin/participants')}
+                className="border-blue-200 text-blue-700 hover:bg-blue-50"
+              >
+                Kelola Peserta (.xlsx)
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Plus}
+                onClick={() => setShowSessionModal(true)}
+              >
+                Tambah Sesi Baru
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -3,6 +3,8 @@
  * Dilengkapi Mock Data jika URL GAS belum dikonfigurasi (untuk kemudahan demo lokal).
  */
 
+import { validateRotatingToken } from '../utils/rotatingToken';
+
 const GAS_API_URL = import.meta.env.VITE_GAS_API_URL || '';
 
 // Mock database in-memory untuk pengujian lokal jika GAS URL belum diisi
@@ -113,12 +115,24 @@ export const gasApi = {
   /**
    * Mulai Sesi Ujian (Registrasi Peserta)
    */
-  async startExam({ token, fullName, identifier }) {
+  async startExam({ token, fullName, identifier, gender, sessionSalt }) {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 700));
       const db = getMockDb();
-      const sess = db.sessions.find(s => s.token.toUpperCase() === token.trim().toUpperCase());
-      if (!sess) throw new Error('Token ujian tidak valid');
+      
+      // Cari sesi yang cocok baik dengan token langsung maupun token berputar 1 menit
+      let sess = db.sessions.find(s => s.token.toUpperCase() === token.trim().toUpperCase());
+      if (!sess) {
+        sess = db.sessions.find(s => validateRotatingToken(token, s.token, s.session_id));
+      }
+      if (!sess && db.sessions.length > 0) {
+        if (validateRotatingToken(token, db.sessions[0].token, sessionSalt || 'PAI_TOT')) {
+          sess = db.sessions[0];
+        }
+      }
+
+      if (!sess) throw new Error('Token ujian tidak valid atau sudah kadaluarsa (token berganti setiap 1 menit)');
+      if (!sess.is_active) throw new Error('Sesi ujian ini sedang dinonaktifkan');
 
       const participantId = 'P-' + Date.now();
       const startTime = new Date().toISOString();
@@ -127,6 +141,7 @@ export const gasApi = {
         session_id: sess.session_id,
         full_name: fullName,
         identifier: identifier,
+        gender: gender || 'Laki-Laki',
         token_used: token,
         start_time: startTime,
         status: 'in_progress'
@@ -137,7 +152,7 @@ export const gasApi = {
 
     const response = await fetch(GAS_API_URL, {
       method: 'POST',
-      body: JSON.stringify({ action: 'startExam', token, fullName, identifier })
+      body: JSON.stringify({ action: 'startExam', token, fullName, identifier, gender, sessionSalt })
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memulai ujian');
@@ -403,6 +418,81 @@ export const gasApi = {
         fileName: file.name,
         mimeType: file.type
       })
+    });
+    return await response.json();
+  },
+
+  /**
+   * Simpan Data Peserta Tunggal (Admin)
+   */
+  async saveParticipant(secretKey, participant) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const existingIdx = db.participants.findIndex(p => p.participant_id === participant.participant_id);
+      if (existingIdx !== -1) {
+        db.participants[existingIdx] = { ...participant };
+      } else {
+        participant.participant_id = 'P-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        participant.status = participant.status || 'registered';
+        db.participants.push(participant);
+      }
+      saveMockDb(db);
+      return { status: 'success', participantId: participant.participant_id };
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'saveParticipant', secretKey, participant })
+    });
+    return await response.json();
+  },
+
+  /**
+   * Batch Simpan Peserta dari File Excel (Admin)
+   */
+  async batchSaveParticipants(secretKey, participants) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      let count = 0;
+      for (const p of participants) {
+        const pId = 'P-' + Date.now() + '-' + (++count);
+        db.participants.push({
+          participant_id: pId,
+          session_id: p.session_id || 'SES-001',
+          username: p.username || '',
+          password: p.password || 'kemenag2026',
+          full_name: p.full_name || p.username || '',
+          gender: p.gender || 'Laki-Laki',
+          identifier: p.identifier || p.username || '',
+          institution: p.institution || '',
+          status: 'registered'
+        });
+      }
+      saveMockDb(db);
+      return { status: 'success', message: `Berhasil menambahkan ${participants.length} peserta` };
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'batchSaveParticipants', secretKey, participants })
+    });
+    return await response.json();
+  },
+
+  /**
+   * Hapus Data Peserta (Admin)
+   */
+  async deleteParticipant(secretKey, participantId) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      db.participants = db.participants.filter(p => p.participant_id !== participantId);
+      saveMockDb(db);
+      return { status: 'success' };
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteParticipant', secretKey, participantId })
     });
     return await response.json();
   }

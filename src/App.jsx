@@ -11,6 +11,7 @@ import { ResultPage } from './pages/user/ResultPage';
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 import { DashboardPage } from './pages/admin/DashboardPage';
 import { QuestionBankPage } from './pages/admin/QuestionBankPage';
+import { ParticipantsPage } from './pages/admin/ParticipantsPage';
 import { ResultsPage } from './pages/admin/ResultsPage';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/admin/dashboard" element={<DashboardPage />} />
             <Route path="/admin/questions" element={<QuestionBankPage />} />
+            <Route path="/admin/participants" element={<ParticipantsPage />} />
             <Route path="/admin/results" element={<ResultsPage />} />
 
             {/* Fallback */}

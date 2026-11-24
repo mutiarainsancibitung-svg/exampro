@@ -16,7 +16,7 @@ const SHEETS = {
 const HEADERS = {
   Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at'],
   Questions: ['question_id', 'session_id', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
-  Participants: ['participant_id', 'session_id', 'full_name', 'identifier', 'gender', 'birth_date', 'token_used', 'start_time', 'status'],
+  Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'institution', 'token_used', 'start_time', 'status'],
   Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at']
 };
 
@@ -88,6 +88,15 @@ function doPost(e) {
         break;
       case 'batchSaveQuestions':
         responseData = handleBatchSaveQuestions(payload);
+        break;
+      case 'saveParticipant':
+        responseData = handleSaveParticipant(payload);
+        break;
+      case 'batchSaveParticipants':
+        responseData = handleBatchSaveParticipants(payload);
+        break;
+      case 'deleteParticipant':
+        responseData = handleDeleteParticipant(payload);
         break;
       case 'deleteQuestion':
         responseData = handleDeleteQuestion(payload);
@@ -179,14 +188,53 @@ function handleAdminLogin(secretKey) {
   return { status: 'error', message: 'Kredensial atau PIN Admin salah' };
 }
 
-function handleGetSession(token) {
+function getMinuteRotatingToken(sessionSalt, offsetMinutes) {
+  const currentMinuteEpoch = Math.floor(new Date().getTime() / 60000) + (offsetMinutes || 0);
+  const seedString = (sessionSalt || 'PAI_TOT') + '_MIN_' + currentMinuteEpoch;
+  let hash = 0;
+  for (let i = 0; i < seedString.length; i++) {
+    hash = ((hash << 5) - hash) + seedString.charCodeAt(i);
+    hash |= 0;
+  }
+  const CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let token = '';
+  let pseudoRandom = Math.abs(hash);
+  for (let i = 0; i < 6; i++) {
+    pseudoRandom = (pseudoRandom * 9301 + 49297) % 233280;
+    const index = Math.floor((pseudoRandom / 233280) * CHARSET.length);
+    token += CHARSET[index];
+  }
+  return token;
+}
+
+function isRotatingTokenMatch(inputToken, sessionId, staticToken) {
+  if (!inputToken) return false;
+  const clean = String(inputToken).trim().toUpperCase();
+  if (staticToken && clean === String(staticToken).trim().toUpperCase()) return true;
+  const t0 = getMinuteRotatingToken(sessionId, 0);
+  const t1 = getMinuteRotatingToken(sessionId, -1);
+  const td0 = getMinuteRotatingToken('PAI_TOT', 0);
+  const td1 = getMinuteRotatingToken('PAI_TOT', -1);
+  return clean === t0 || clean === t1 || clean === td0 || clean === td1;
+}
+
+function handleGetSession(token, sessionSalt) {
   if (!token) return { status: 'error', message: 'Token tidak boleh kosong' };
   
   const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
-  const session = sessions.find(s => String(s.token).trim().toUpperCase() === String(token).trim().toUpperCase());
+  let session = sessions.find(s => String(s.token).trim().toUpperCase() === String(token).trim().toUpperCase());
 
   if (!session) {
-    return { status: 'error', message: 'Token ujian tidak ditemukan atau tidak valid' };
+    session = sessions.find(s => isRotatingTokenMatch(token, s.session_id, s.token));
+  }
+  if (!session && sessions.length > 0) {
+    if (isRotatingTokenMatch(token, sessionSalt || 'PAI_TOT', sessions[0].token)) {
+      session = sessions[0];
+    }
+  }
+
+  if (!session) {
+    return { status: 'error', message: 'Token ujian tidak ditemukan atau sudah kadaluarsa (token berganti setiap 1 menit)' };
   }
 
   if (String(session.is_active).toUpperCase() !== 'TRUE') {
@@ -255,15 +303,15 @@ function handleGetExamQuestions(token, participantId) {
 }
 
 /**
- * Registrasi Peserta (Mendukung Gender & Tanggal Lahir sesuai Gambar 3)
+ * Registrasi Peserta (Mendukung Gender & Token Berputar Dinamis)
  */
 function handleStartExam(payload) {
-  const { token, fullName, identifier, gender, birthDate } = payload;
+  const { token, fullName, identifier, gender, sessionSalt } = payload;
   if (!token || !fullName || !identifier) {
     return { status: 'error', message: 'Data peserta wajib diisi lengkap' };
   }
 
-  const sessionRes = handleGetSession(token);
+  const sessionRes = handleGetSession(token, sessionSalt);
   if (sessionRes.status !== 'success') return sessionRes;
 
   const session = sessionRes.session;
@@ -276,10 +324,12 @@ function handleStartExam(payload) {
   partSheet.appendRow([
     participantId,
     session.session_id,
-    fullName.trim(),
     identifier.trim(),
+    'kemenag2026',
+    fullName.trim(),
     gender || 'Laki-Laki',
-    birthDate || '',
+    identifier.trim(),
+    payload.institution || '',
     token.trim().toUpperCase(),
     startTime,
     'in_progress'
@@ -621,4 +671,81 @@ function shuffleArray(array) {
     arr[j] = temp;
   }
   return arr;
+}
+
+function handleSaveParticipant(payload) {
+  const { secretKey, participant } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!participant || (!participant.username && !participant.full_name)) {
+    return { status: 'error', message: 'Username atau Nama Lengkap peserta wajib diisi' };
+  }
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  const rows = sheet.getDataRange().getValues();
+  const pId = participant.participant_id || ('P-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000));
+
+  let existingRow = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(pId) || (participant.username && String(rows[i][2]) === String(participant.username))) {
+      existingRow = i + 1;
+      break;
+    }
+  }
+
+  const rowData = [
+    pId,
+    participant.session_id || 'SES-001',
+    participant.username || '',
+    participant.password || 'kemenag2026',
+    participant.full_name || participant.username || '',
+    participant.gender || 'Laki-Laki',
+    participant.identifier || participant.username || '',
+    participant.institution || '',
+    participant.token_used || '',
+    participant.start_time || new Date().toISOString(),
+    participant.status || 'registered'
+  ];
+
+  if (existingRow > 0) {
+    sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+
+  return { status: 'success', message: 'Data peserta berhasil disimpan', participantId: pId };
+}
+
+function handleBatchSaveParticipants(payload) {
+  const { secretKey, participants } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!participants || !Array.isArray(participants)) return { status: 'error', message: 'Data peserta kosong' };
+
+  let count = 0;
+  for (let i = 0; i < participants.length; i++) {
+    handleSaveParticipant({
+      secretKey: secretKey,
+      participant: participants[i]
+    });
+    count++;
+  }
+
+  return { status: 'success', message: `Berhasil menyimpan ${count} data peserta` };
+}
+
+function handleDeleteParticipant(payload) {
+  const { secretKey, participantId } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  const rows = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(participantId)) {
+      sheet.deleteRow(i + 1);
+      return { status: 'success', message: 'Peserta berhasil dihapus' };
+    }
+  }
+  return { status: 'error', message: 'Peserta tidak ditemukan' };
 }

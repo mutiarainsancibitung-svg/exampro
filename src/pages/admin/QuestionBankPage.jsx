@@ -186,10 +186,10 @@ export const QuestionBankPage = () => {
               size="sm"
               icon={Download}
               onClick={downloadExcelTemplate}
-              title="Unduh file template Excel (.csv)"
+              title="Unduh file template Excel (.xlsx)"
               className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
             >
-              Download Template Excel
+              Download Template Excel (.xlsx)
             </Button>
 
             {/* Tombol Import Excel */}
@@ -204,7 +204,7 @@ export const QuestionBankPage = () => {
               }}
               className="border-kemenag-300 text-kemenag-800 hover:bg-kemenag-50"
             >
-              Import dari Excel / CSV
+              Import dari Excel (.xlsx)
             </Button>
 
             {/* Tombol Tambah Soal Manual */}
@@ -270,18 +270,18 @@ export const QuestionBankPage = () => {
         </div>
       </div>
 
-      {/* Modal Import Soal dari Excel / CSV */}
+      {/* Modal Import Soal dari Excel (.xlsx) */}
       <Modal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        title="Import Bank Soal dari File Excel / CSV"
+        title="Import Bank Soal dari File Excel (.xlsx)"
         maxWidth="max-w-2xl"
       >
         <div className="space-y-4">
           <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1.5">
             <h5 className="font-bold flex items-center gap-1.5">
               <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              Petunjuk Format Excel:
+              Petunjuk Format Excel (.xlsx):
             </h5>
             <p>
               Pastikan kolom sesuai template: <code>No, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Kunci_Jawaban, Bobot</code>.
@@ -290,17 +290,17 @@ export const QuestionBankPage = () => {
               onClick={downloadExcelTemplate}
               className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block"
             >
-              Unduh Template Contoh Di Sini (.csv)
+              Unduh Template Contoh Di Sini (.xlsx)
             </button>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Pilih File Excel / CSV dari Komputer:
+              Pilih File Excel (.xlsx / .xls) dari Komputer:
             </label>
             <input
               type="file"
-              accept=".csv, .xlsx, .xls"
+              accept=".xlsx, .xls, .csv"
               onChange={handleSelectExcelFile}
               className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-kemenag-50 file:text-kemenag-700 hover:file:bg-kemenag-100 cursor-pointer"
             />

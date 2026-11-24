@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, BookOpen, Award, LogOut, ExternalLink } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Users, Award, LogOut, ExternalLink } from 'lucide-react';
 
 export const AdminLayout = ({ children, title }) => {
   const { logoutAdmin } = useAuth();
@@ -15,6 +15,7 @@ export const AdminLayout = ({ children, title }) => {
   const navItems = [
     { label: 'Dashboard & Sesi', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Bank Soal & Excel', path: '/admin/questions', icon: BookOpen },
+    { label: 'Data Peserta & Excel', path: '/admin/participants', icon: Users },
     { label: 'Rekap Nilai & Essay', path: '/admin/results', icon: Award }
   ];
 
