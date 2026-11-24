@@ -246,18 +246,6 @@ export const TokenLoginPage = () => {
                   Login
                 </Button>
               </form>
-
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                <span className="text-[11px] text-slate-400">
-                  Pastikan akun Anda sudah didaftarkan oleh panitia
-                </span>
-                <a
-                  href="/admin/login"
-                  className="text-slate-500 hover:text-kemenag-700 font-semibold transition"
-                >
-                  Panel Admin &rarr;
-                </a>
-              </div>
             </Card>
           </div>
         )}

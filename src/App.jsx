@@ -28,6 +28,7 @@ export default function App() {
             <Route path="/result" element={<ResultPage />} />
 
             {/* Rute Panel Admin */}
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/admin/dashboard" element={<DashboardPage />} />
             <Route path="/admin/exam-setup" element={<ExamSetupPage />} />
