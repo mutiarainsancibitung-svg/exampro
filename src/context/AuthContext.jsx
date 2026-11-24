@@ -19,6 +19,11 @@ export const AuthProvider = ({ children }) => {
     return sessionStorage.getItem('exampro_admin_secret') || '';
   });
 
+  const [adminUser, setAdminUser] = useState(() => {
+    const saved = sessionStorage.getItem('exampro_admin_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   // Simpan ke sessionStorage setiap ada perubahan
   useEffect(() => {
     if (participant) {
@@ -44,6 +49,14 @@ export const AuthProvider = ({ children }) => {
     }
   }, [adminSecretKey]);
 
+  useEffect(() => {
+    if (adminUser) {
+      sessionStorage.setItem('exampro_admin_user', JSON.stringify(adminUser));
+    } else {
+      sessionStorage.removeItem('exampro_admin_user');
+    }
+  }, [adminUser]);
+
   const loginParticipant = (participantInfo, sessionInfo) => {
     setParticipant(participantInfo);
     setSessionData(sessionInfo);
@@ -56,13 +69,22 @@ export const AuthProvider = ({ children }) => {
     sessionStorage.removeItem('exampro_session');
   };
 
-  const loginAdmin = (secretKey) => {
+  const loginAdmin = (secretKey, userData = null) => {
     setAdminSecretKey(secretKey);
+    const resolvedUser = userData || {
+      admin_id: 'ADM-001',
+      username: 'admin',
+      name: 'Administrator Utama',
+      role: 'superadmin'
+    };
+    setAdminUser(resolvedUser);
   };
 
   const logoutAdmin = () => {
     setAdminSecretKey('');
+    setAdminUser(null);
     sessionStorage.removeItem('exampro_admin_secret');
+    sessionStorage.removeItem('exampro_admin_user');
   };
 
   return (
@@ -71,6 +93,8 @@ export const AuthProvider = ({ children }) => {
         participant,
         sessionData,
         adminSecretKey,
+        adminUser,
+        adminRole: adminUser?.role || 'superadmin',
         isAdminLoggedIn: Boolean(adminSecretKey),
         isParticipantLoggedIn: Boolean(participant && sessionData),
         loginParticipant,

@@ -13,6 +13,7 @@ import { DashboardPage } from './pages/admin/DashboardPage';
 import { QuestionBankPage } from './pages/admin/QuestionBankPage';
 import { ParticipantsPage } from './pages/admin/ParticipantsPage';
 import { ResultsPage } from './pages/admin/ResultsPage';
+import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="/admin/questions" element={<QuestionBankPage />} />
             <Route path="/admin/participants" element={<ParticipantsPage />} />
             <Route path="/admin/results" element={<ResultsPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

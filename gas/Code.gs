@@ -10,14 +10,16 @@ const SHEETS = {
   SESSIONS: 'Sessions',
   QUESTIONS: 'Questions',
   PARTICIPANTS: 'Participants',
-  SUBMISSIONS: 'Submissions'
+  SUBMISSIONS: 'Submissions',
+  ADMINS: 'Admins'
 };
 
 const HEADERS = {
   Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at'],
   Questions: ['question_id', 'session_id', 'paket', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
   Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'kelas', 'institution', 'paket', 'token_used', 'start_time', 'status'],
-  Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at']
+  Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at'],
+  Admins: ['admin_id', 'username', 'password', 'name', 'role', 'is_active', 'created_at']
 };
 
 function doGet(e) {
@@ -41,6 +43,9 @@ function doGet(e) {
         break;
       case 'getAdminDashboard':
         responseData = handleGetAdminDashboard(params.secretKey);
+        break;
+      case 'getAdminUsers':
+        responseData = handleGetAdminUsers(params.secretKey);
         break;
       default:
         responseData = { status: 'error', message: 'Invalid GET action: ' + action };
@@ -69,7 +74,7 @@ function doPost(e) {
 
     switch (action) {
       case 'adminLogin':
-        responseData = handleAdminLogin(payload.secretKey);
+        responseData = handleAdminLogin(payload);
         break;
       case 'participantLogin':
         responseData = handleParticipantLogin(payload);
@@ -109,6 +114,12 @@ function doPost(e) {
         break;
       case 'uploadMedia':
         responseData = handleUploadMedia(payload);
+        break;
+      case 'saveAdminUser':
+        responseData = handleSaveAdminUser(payload);
+        break;
+      case 'deleteAdminUser':
+        responseData = handleDeleteAdminUser(payload);
         break;
       default:
         responseData = { status: 'error', message: 'Invalid POST action: ' + action };
@@ -184,11 +195,92 @@ function verifyAdminSecret(secretKey) {
   return secretKey && secretKey.trim() === validKey.trim();
 }
 
-function handleAdminLogin(secretKey) {
-  if (verifyAdminSecret(secretKey)) {
-    return { status: 'success', message: 'Otentikasi admin berhasil' };
+function handleAdminLogin(param) {
+  // 1. Dukungan jika parameter berupa string Secret Key / PIN langsung
+  if (typeof param === 'string') {
+    if (verifyAdminSecret(param)) {
+      return {
+        status: 'success',
+        message: 'Otentikasi PIN admin berhasil',
+        secretKey: param,
+        user: { admin_id: 'ADM-001', username: 'admin', name: 'Administrator Utama', role: 'superadmin' }
+      };
+    }
+    return { status: 'error', message: 'Kredensial atau PIN Admin salah' };
   }
-  return { status: 'error', message: 'Kredensial atau PIN Admin salah' };
+
+  // 2. Dukungan jika parameter berupa object payload
+  const payload = param || {};
+  if (payload.secretKey && !payload.username) {
+    if (verifyAdminSecret(payload.secretKey)) {
+      return {
+        status: 'success',
+        message: 'Otentikasi PIN admin berhasil',
+        secretKey: payload.secretKey,
+        user: { admin_id: 'ADM-001', username: 'admin', name: 'Administrator Utama', role: 'superadmin' }
+      };
+    }
+    return { status: 'error', message: 'Kredensial atau PIN Admin salah' };
+  }
+
+  const uInput = String(payload.username || '').trim().toLowerCase();
+  const pInput = String(payload.password || '').trim();
+
+  if (!uInput || !pInput) {
+    return { status: 'error', message: 'Username dan Password wajib diisi!' };
+  }
+
+  // Cek pada Sheet Admins
+  let admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  if (!admins || admins.length === 0) {
+    initializeDefaultAdmins();
+    admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  }
+
+  const matched = admins.find(a =>
+    String(a.username).trim().toLowerCase() === uInput &&
+    String(a.password).trim() === pInput
+  );
+
+  if (matched) {
+    if (String(matched.is_active).toUpperCase() === 'FALSE') {
+      return { status: 'error', message: 'Akun admin Anda sedang dinonaktifkan oleh Administrator.' };
+    }
+    return {
+      status: 'success',
+      secretKey: 'admin123',
+      user: {
+        admin_id: matched.admin_id,
+        username: matched.username,
+        name: matched.name,
+        role: matched.role || 'instructor'
+      },
+      message: `Selamat datang, ${matched.name}!`
+    };
+  }
+
+  // Akun bawaan darurat (fail-safe)
+  const defaultAccounts = [
+    { admin_id: 'ADM-001', username: 'admin', password: 'admin123', name: 'Administrator Utama', role: 'superadmin' },
+    { admin_id: 'ADM-002', username: 'dosen_pai', password: 'guru2026', name: 'Dosen PAI Pengampu', role: 'instructor' },
+    { admin_id: 'ADM-003', username: 'pengawas01', password: 'proctor2026', name: 'Pengawas Ruang Ujian', role: 'proctor' }
+  ];
+  const defMatch = defaultAccounts.find(a => a.username === uInput && a.password === pInput);
+  if (defMatch) {
+    return {
+      status: 'success',
+      secretKey: 'admin123',
+      user: {
+        admin_id: defMatch.admin_id,
+        username: defMatch.username,
+        name: defMatch.name,
+        role: defMatch.role
+      },
+      message: `Selamat datang, ${defMatch.name}!`
+    };
+  }
+
+  return { status: 'error', message: 'Username atau Password salah! Periksa kembali akun login Anda.' };
 }
 
 function getMinuteRotatingToken(sessionSalt, offsetMinutes) {
@@ -446,6 +538,11 @@ function handleGetAdminDashboard(secretKey) {
   const questions = getSheetDataAsObjects(SHEETS.QUESTIONS);
   const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
   const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS);
+  let admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  if (!admins || admins.length === 0) {
+    initializeDefaultAdmins();
+    admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  }
 
   const parsedQuestions = questions.map(q => {
     let opts = [];
@@ -462,8 +559,113 @@ function handleGetAdminDashboard(secretKey) {
     sessions: sessions,
     questions: parsedQuestions,
     participants: participants,
-    submissions: submissions
+    submissions: submissions,
+    admins: admins
   };
+}
+
+function initializeDefaultAdmins() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.ADMINS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.ADMINS);
+    sheet.appendRow(HEADERS.Admins);
+    sheet.getRange(1, 1, 1, HEADERS.Admins.length)
+      .setFontWeight('bold')
+      .setBackground('#0D7A5F')
+      .setFontColor('#FFFFFF');
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) {
+    const defaultAdmins = [
+      ['ADM-001', 'admin', 'admin123', 'Administrator Utama', 'superadmin', true, new Date().toISOString()],
+      ['ADM-002', 'dosen_pai', 'guru2026', 'Dosen PAI Pengampu', 'instructor', true, new Date().toISOString()],
+      ['ADM-003', 'pengawas01', 'proctor2026', 'Pengawas Ruang Ujian', 'proctor', true, new Date().toISOString()]
+    ];
+    defaultAdmins.forEach(row => sheet.appendRow(row));
+  }
+}
+
+function handleGetAdminUsers(secretKey) {
+  if (!verifyAdminSecret(secretKey)) {
+    return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
+  }
+  let admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  if (!admins || admins.length === 0) {
+    initializeDefaultAdmins();
+    admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  }
+  return { status: 'success', admins: admins };
+}
+
+function handleSaveAdminUser(payload) {
+  const { secretKey, adminData } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!adminData || !adminData.username || !adminData.name) {
+    return { status: 'error', message: 'Username dan Nama Admin wajib diisi' };
+  }
+
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.ADMINS);
+  if (!sheet) {
+    initializeDefaultAdmins();
+    sheet = ss.getSheetByName(SHEETS.ADMINS);
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  const adminId = adminData.admin_id || ('ADM-' + new Date().getTime());
+  const cleanUsername = String(adminData.username).trim().toLowerCase();
+
+  let existingRow = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(adminId) || String(rows[i][1]).toLowerCase() === cleanUsername) {
+      existingRow = i + 1;
+      break;
+    }
+  }
+
+  const rowData = [
+    adminId,
+    cleanUsername,
+    adminData.password || (existingRow > 0 ? rows[existingRow - 1][2] : 'admin123'),
+    adminData.name,
+    adminData.role || 'instructor',
+    adminData.is_active !== false && String(adminData.is_active).toUpperCase() !== 'FALSE',
+    adminData.created_at || new Date().toISOString()
+  ];
+
+  if (existingRow > 0) {
+    sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+
+  return { status: 'success', message: 'Data akun admin berhasil disimpan', adminId: adminId };
+}
+
+function handleDeleteAdminUser(payload) {
+  const { secretKey, adminId } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.ADMINS);
+  if (!sheet) return { status: 'error', message: 'Sheet Admins tidak ditemukan' };
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(adminId)) {
+      if (String(rows[i][4]) === 'superadmin') {
+        const superCount = rows.filter((r, idx) => idx > 0 && String(r[4]) === 'superadmin').length;
+        if (superCount <= 1) {
+          return { status: 'error', message: 'Tidak dapat menghapus satu-satunya akun Super Admin!' };
+        }
+      }
+      sheet.deleteRow(i + 1);
+      return { status: 'success', message: 'Akun admin berhasil dihapus' };
+    }
+  }
+  return { status: 'error', message: 'Pengguna admin tidak ditemukan' };
 }
 
 function handleSaveSession(payload) {

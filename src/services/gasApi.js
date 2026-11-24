@@ -31,7 +31,36 @@ function getMockDb() {
     ],
     questions: [],
     participants: [],
-    submissions: []
+    submissions: [],
+    admins: [
+      {
+        admin_id: 'ADM-001',
+        username: 'admin',
+        password: 'admin123',
+        name: 'Administrator Utama',
+        role: 'superadmin',
+        is_active: true,
+        created_at: new Date().toISOString()
+      },
+      {
+        admin_id: 'ADM-002',
+        username: 'dosen_pai',
+        password: 'dosen123',
+        name: 'Dr. H. Muhammad Ilyas, M.Ag',
+        role: 'instructor',
+        is_active: true,
+        created_at: new Date().toISOString()
+      },
+      {
+        admin_id: 'ADM-003',
+        username: 'pengawas01',
+        password: 'awas123',
+        name: 'Ustadz Rahmat Hidayat, S.Pd.I',
+        role: 'proctor',
+        is_active: true,
+        created_at: new Date().toISOString()
+      }
+    ]
   };
   localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(initial));
   return initial;
@@ -280,20 +309,73 @@ export const gasApi = {
   },
 
   /**
-   * Otentikasi Login Admin
+   * Otentikasi Login Admin (Mendukung Username & Password serta Secret Key)
    */
-  async adminLogin(secretKey) {
+  async adminLogin(param) {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 500));
-      if (secretKey === 'admin123' || secretKey.length >= 4) {
-        return { status: 'success', message: 'Login Admin Lokal Berhasil' };
+      const db = getMockDb();
+      db.admins = db.admins || [];
+
+      // Jika parameter adalah objek { username, password }
+      if (typeof param === 'object' && param !== null) {
+        const uClean = String(param.username || '').trim().toLowerCase();
+        const pClean = String(param.password || '').trim();
+
+        const match = db.admins.find(
+          a => String(a.username || '').trim().toLowerCase() === uClean &&
+               String(a.password || '').trim() === pClean
+        );
+
+        if (match) {
+          if (!match.is_active) {
+            throw new Error('Akun admin Anda sedang dinonaktifkan.');
+          }
+          return {
+            status: 'success',
+            secretKey: 'admin123',
+            user: match,
+            message: `Selamat datang, ${match.name}!`
+          };
+        }
+
+        // Fallback demo akun default jika db belum memiliki data
+        if (uClean === 'admin' && pClean === 'admin123') {
+          const defaultAdmin = {
+            admin_id: 'ADM-001',
+            username: 'admin',
+            name: 'Administrator Utama',
+            role: 'superadmin',
+            is_active: true
+          };
+          return { status: 'success', secretKey: 'admin123', user: defaultAdmin };
+        }
+
+        throw new Error('Username atau Password Admin salah.');
       }
-      throw new Error('PIN Admin salah (Default demo: admin123)');
+
+      // Jika parameter adalah string PIN/SecretKey
+      const pin = String(param || '').trim();
+      if (pin === 'admin123' || pin.length >= 4) {
+        const defaultAdmin = (db.admins && db.admins[0]) || {
+          admin_id: 'ADM-001',
+          username: 'admin',
+          name: 'Administrator Utama',
+          role: 'superadmin',
+          is_active: true
+        };
+        return { status: 'success', secretKey: pin, user: defaultAdmin, message: 'Login Admin Berhasil' };
+      }
+      throw new Error('Kredensial Admin salah (Default demo: admin / admin123)');
     }
+
+    const payload = typeof param === 'object' && param !== null
+      ? { action: 'adminLogin', ...param }
+      : { action: 'adminLogin', secretKey: param };
 
     const response = await fetch(GAS_API_URL, {
       method: 'POST',
-      body: JSON.stringify({ action: 'adminLogin', secretKey })
+      body: JSON.stringify(payload)
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Kredensial Admin Salah');
@@ -312,7 +394,8 @@ export const gasApi = {
         sessions: db.sessions,
         questions: db.questions,
         participants: db.participants,
-        submissions: db.submissions
+        submissions: db.submissions,
+        admins: db.admins || []
       };
     }
 
@@ -513,6 +596,64 @@ export const gasApi = {
     const response = await fetch(GAS_API_URL, {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteParticipant', secretKey, participantId })
+    });
+    return await response.json();
+  },
+
+  /**
+   * Ambil Daftar Pengguna Admin & Role (Super Admin)
+   */
+  async getAdminUsers(secretKey) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      return { status: 'success', admins: db.admins || [] };
+    }
+
+    const response = await fetch(`${GAS_API_URL}?action=getAdminUsers&secretKey=${encodeURIComponent(secretKey)}`);
+    return await response.json();
+  },
+
+  /**
+   * Simpan / Tambah Pengguna Admin (Super Admin)
+   */
+  async saveAdminUser(secretKey, adminData) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      db.admins = db.admins || [];
+      const existingIdx = db.admins.findIndex(a => a.admin_id === adminData.admin_id);
+      if (existingIdx !== -1) {
+        db.admins[existingIdx] = { ...db.admins[existingIdx], ...adminData };
+      } else {
+        adminData.admin_id = 'ADM-' + Date.now();
+        adminData.created_at = new Date().toISOString();
+        adminData.is_active = adminData.is_active !== undefined ? adminData.is_active : true;
+        db.admins.push(adminData);
+      }
+      saveMockDb(db);
+      return { status: 'success', adminId: adminData.admin_id, message: 'Data admin berhasil disimpan.' };
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'saveAdminUser', secretKey, adminData })
+    });
+    return await response.json();
+  },
+
+  /**
+   * Hapus Pengguna Admin (Super Admin)
+   */
+  async deleteAdminUser(secretKey, adminId) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      db.admins = (db.admins || []).filter(a => a.admin_id !== adminId);
+      saveMockDb(db);
+      return { status: 'success', message: 'Admin berhasil dihapus.' };
+    }
+
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteAdminUser', secretKey, adminId })
     });
     return await response.json();
   }
