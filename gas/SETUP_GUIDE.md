@@ -28,20 +28,26 @@ Backend ExamPro menggunakan Google Apps Script (GAS) yang terhubung langsung ke 
 
 ---
 
-## Langkah 4: Inisialisasi Database (Setup 5 Sheet)
+## Langkah 4: Inisialisasi Database (Setup 5 Sheet & Cek Header)
 1. Kembali ke editor kode (`Code.gs`).
-2. Di dropdown fungsi bagian atas (di samping tombol *Debug*), pilih fungsi **`setupDatabaseSheets`**.
+2. Di dropdown fungsi bagian atas (di samping tombol *Debug*), pilih fungsi **`checkAndRepairDatabase`** (atau `setupDatabaseSheets`).
 3. Klik tombol **Run (Jalankan)**.
 4. Google akan meminta izin otorisasi (*Review Permissions*):
    * Pilih akun Google Anda.
    * Klik **Advanced (Lanjutan)** > **Go to ExamPro Backend API (unsafe)**.
    * Klik **Allow (Izinkan)**.
-5. Setelah selesai dijalankan, buka kembali tab Google Sheets Anda. Anda akan melihat 5 sheet telah otomatis dibuat dengan header yang rapi:
+5. Setelah selesai dijalankan, buka kembali tab Google Sheets Anda. Anda akan melihat 5 sheet telah otomatis dibuat dan diformat dengan header resmi warna hijau Kemenag (`#0D7A5F`) serta dibekukan (freeze row 1):
    - `Sessions`
    - `Questions`
    - `Participants`
    - `Submissions`
    - `Admins` (Untuk manajemen akun Super Admin, Pengajar, dan Pengawas)
+
+> **Fitur Cek & Perbaiki Otomatis (Self-Healing Header):**
+> Jika Google Sheets Anda sebelumnya sudah ada datanya tetapi **headernya kosong atau hilang**, fungsi `checkAndRepairDatabase` akan:
+> - Mendeteksi baris 1 yang kosong dan langsung mengisikan header standar.
+> - Jika baris 1 berisi data peserta/soal tanpa header, sistem akan otomatis **menyisipkan baris baru di atasnya** sebagai header tanpa menghapus data yang sudah ada!
+> - Fitur ini juga dapat dijalankan kapan saja langsung dari web app panel admin melalui tombol **"Cek & Perbaiki Database"** di Dashboard.
 
 ---
 

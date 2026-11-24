@@ -33,7 +33,9 @@ function doGet(e) {
         responseData = { status: 'success', message: 'ExamPro PAI CBT API Active' };
         break;
       case 'setup':
-        responseData = setupDatabaseSheets();
+      case 'checkAndRepair':
+      case 'repairDatabase':
+        responseData = checkAndRepairDatabase();
         break;
       case 'getSession':
         responseData = handleGetSession(params.token);
@@ -121,6 +123,10 @@ function doPost(e) {
       case 'deleteAdminUser':
         responseData = handleDeleteAdminUser(payload);
         break;
+      case 'checkAndRepair':
+      case 'repairDatabase':
+        responseData = checkAndRepairDatabase();
+        break;
       default:
         responseData = { status: 'error', message: 'Invalid POST action: ' + action };
     }
@@ -140,38 +146,177 @@ function getSpreadsheet() {
 }
 
 function setupDatabaseSheets() {
+  return checkAndRepairDatabase();
+}
+
+/**
+ * Fungsi Cek & Perbaiki Database (Google Sheets)
+ * - Memeriksa keberadaan 5 Sheet (Sessions, Questions, Participants, Submissions, Admins)
+ * - Memeriksa apakah header kolom di baris 1 sudah ada
+ * - Jika baris 1 kosong / hilang: langsung mengisi header standar Kemenag FITK UIN
+ * - Jika baris 1 berisi data (tanpa header): menyisipkan baris baru di baris 1 sebagai header tanpa menghilangkan data
+ * - Memberikan format visual resmi (Warna Kemenag #0D7A5F, teks putih tebal, baris 1 dibekukan)
+ * - Mengisi data default jika sheet masih baru/kosong
+ */
+function checkAndRepairDatabase() {
   const ss = getSpreadsheet();
-  const createdSheets = [];
+  const report = [];
 
   for (const sheetName in HEADERS) {
+    const expectedHeaders = HEADERS[sheetName];
     let sheet = ss.getSheetByName(sheetName);
+    let actionTaken = '';
+
+    // 1. Jika sheet belum ada sama sekali
     if (!sheet) {
       sheet = ss.insertSheet(sheetName);
-      sheet.appendRow(HEADERS[sheetName]);
-      sheet.getRange(1, 1, 1, HEADERS[sheetName].length)
-        .setFontWeight('bold')
-        .setBackground('#0D7A5F')
-        .setFontColor('#FFFFFF');
-      createdSheets.push(sheetName);
+      sheet.appendRow(expectedHeaders);
+      formatHeaderRow(sheet, expectedHeaders.length);
+      actionTaken = 'Sheet baru berhasil dibuat beserta header kolom';
+    } else {
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+
+      // 2. Jika sheet ada tapi 0 baris / 0 kolom
+      if (lastRow === 0 || lastCol === 0) {
+        sheet.appendRow(expectedHeaders);
+        formatHeaderRow(sheet, expectedHeaders.length);
+        actionTaken = 'Sheet kosong, header standar berhasil ditambahkan';
+      } else {
+        // 3. Periksa isi baris 1
+        const maxCol = Math.max(lastCol, expectedHeaders.length);
+        const row1Values = sheet.getRange(1, 1, 1, maxCol).getValues()[0];
+        
+        // Cek apakah baris 1 seluruhnya kosong / null
+        const isRow1Blank = row1Values.slice(0, expectedHeaders.length).every(function(v) {
+          return v === '' || v === null || v === undefined;
+        });
+
+        const firstCell = String(row1Values[0] || '').trim().toLowerCase();
+        const expectedFirstCell = String(expectedHeaders[0]).trim().toLowerCase();
+
+        if (isRow1Blank) {
+          // Baris 1 kosong: langsung isi dengan header
+          sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+          formatHeaderRow(sheet, expectedHeaders.length);
+          actionTaken = 'Baris 1 yang kosong berhasil diisi header kolom';
+        } else if (firstCell === expectedFirstCell) {
+          // Baris 1 sudah merupakan header: periksa apakah ada kolom yang kurang / perlu diperbarui
+          let needsUpdate = false;
+          for (let c = 0; c < expectedHeaders.length; c++) {
+            if (String(row1Values[c] || '').trim().toLowerCase() !== String(expectedHeaders[c]).trim().toLowerCase()) {
+              needsUpdate = true;
+              break;
+            }
+          }
+          if (needsUpdate || lastCol < expectedHeaders.length) {
+            sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+            formatHeaderRow(sheet, expectedHeaders.length);
+            actionTaken = 'Header kolom disinkronkan ke struktur terbaru';
+          } else {
+            formatHeaderRow(sheet, expectedHeaders.length);
+            actionTaken = 'Header kolom sudah valid dan terformat rapi';
+          }
+        } else {
+          // Baris 1 berisi DATA peserta/soal/dll (bukan header)!
+          // Sisipkan baris baru di atas baris 1 agar data pengguna TIDAK hilang
+          sheet.insertRowBefore(1);
+          sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+          formatHeaderRow(sheet, expectedHeaders.length);
+          actionTaken = 'Data terdeteksi tanpa header; baris 1 baru disisipkan sebagai header';
+        }
+      }
     }
+
+    // 4. Inisialisasi data bawaan jika sheet baru memiliki baris header saja
+    if (sheet.getLastRow() <= 1) {
+      if (sheetName === SHEETS.ADMINS) {
+        const defaultAdmins = [
+          ['ADM-001', 'admin', 'admin123', 'Administrator Utama', 'superadmin', true, new Date().toISOString()],
+          ['ADM-002', 'dosen_pai', 'guru2026', 'Dosen PAI Pengampu', 'instructor', true, new Date().toISOString()],
+          ['ADM-003', 'pengawas01', 'proctor2026', 'Pengawas Ruang Ujian', 'proctor', true, new Date().toISOString()]
+        ];
+        defaultAdmins.forEach(function(r) { sheet.appendRow(r); });
+        actionTaken += ' + Akun bawaan admin ditambahkan';
+      } else if (sheetName === SHEETS.SESSIONS) {
+        sheet.appendRow([
+          'SES-001',
+          'Pelatihan Guru PAI - Penguatan Kompetensi 2026',
+          'pretest',
+          'PAI2026',
+          60,
+          true,
+          true,
+          true,
+          true,
+          new Date().toISOString()
+        ]);
+        actionTaken += ' + Sesi ujian awal ditambahkan';
+      }
+    }
+
+    report.push({
+      sheet: sheetName,
+      status: 'OK',
+      action: actionTaken,
+      totalRows: sheet.getLastRow(),
+      totalCols: sheet.getLastColumn()
+    });
   }
 
+  // 5. Bersihkan Sheet1 bawaan Google Sheets jika sheet sistem sudah lengkap
   const defaultSheet = ss.getSheetByName('Sheet1');
   if (defaultSheet && ss.getSheets().length > 1) {
-    try { ss.deleteSheet(defaultSheet); } catch(e) {}
+    try { ss.deleteSheet(defaultSheet); } catch (e) {}
   }
 
   return {
     status: 'success',
-    message: 'Setup database Pelatihan Guru PAI berhasil',
-    created: createdSheets
+    message: 'Pemeriksaan dan perbaikan database Google Sheets selesai.',
+    timestamp: new Date().toISOString(),
+    report: report
   };
 }
 
+function formatHeaderRow(sheet, numCols) {
+  try {
+    sheet.getRange(1, 1, 1, numCols)
+      .setFontWeight('bold')
+      .setBackground('#0D7A5F')
+      .setFontColor('#FFFFFF')
+      .setHorizontalAlignment('center')
+      .setVerticalAlignment('middle');
+    sheet.setRowHeight(1, 35);
+    sheet.setFrozenRows(1);
+  } catch (e) {}
+}
+
 function getSheetDataAsObjects(sheetName) {
-  const sheet = getSpreadsheet().getSheetByName(sheetName);
-  if (!sheet) return [];
-  const rows = sheet.getDataRange().getValues();
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    checkAndRepairDatabase();
+    sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return [];
+  }
+
+  let rows = sheet.getDataRange().getValues();
+  if (rows.length === 0) {
+    checkAndRepairDatabase();
+    rows = sheet.getDataRange().getValues();
+    if (rows.length === 0) return [];
+  }
+
+  // Self-healing: jika baris 1 kosong atau bukan header standar, otomatis jalankan perbaikan
+  const expectedHeader0 = (HEADERS[sheetName] && HEADERS[sheetName][0]) || '';
+  if (rows.length >= 1 && expectedHeader0) {
+    const r1c0 = String(rows[0][0] || '').trim().toLowerCase();
+    if (r1c0 !== expectedHeader0.toLowerCase()) {
+      checkAndRepairDatabase();
+      rows = sheet.getDataRange().getValues();
+    }
+  }
+
   if (rows.length <= 1) return [];
 
   const headers = rows[0];
@@ -179,9 +324,18 @@ function getSheetDataAsObjects(sheetName) {
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
+    // Abaikan baris kosong
+    const isBlank = row.every(function(val) {
+      return val === '' || val === null || val === undefined;
+    });
+    if (isBlank) continue;
+
     const obj = {};
     for (let j = 0; j < headers.length; j++) {
-      obj[headers[j]] = row[j];
+      const h = String(headers[j] || '').trim();
+      if (h) {
+        obj[h] = row[j];
+      }
     }
     obj._rowIndex = i + 1;
     data.push(obj);

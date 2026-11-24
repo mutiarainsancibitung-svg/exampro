@@ -6,7 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database } from 'lucide-react';
 
 export const DashboardPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -15,6 +15,9 @@ export const DashboardPage = () => {
   const [data, setData] = useState({ sessions: [], questions: [], participants: [], submissions: [] });
   const [loading, setLoading] = useState(true);
   const [showSessionModal, setShowSessionModal] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState(null);
+  const [showRepairModal, setShowRepairModal] = useState(false);
   const [sessionForm, setSessionForm] = useState({
     title: '',
     type: 'pretest',
@@ -81,6 +84,20 @@ export const DashboardPage = () => {
     }
   };
 
+  const handleCheckAndRepair = async () => {
+    setRepairing(true);
+    try {
+      const res = await gasApi.checkAndRepairDatabase(adminSecretKey);
+      setRepairResult(res);
+      setShowRepairModal(true);
+      loadDashboard();
+    } catch (err) {
+      alert('Gagal memeriksa/memperbaiki database: ' + err.message);
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   const stats = [
     { label: 'Total Sesi Evaluasi', value: data.sessions.length, icon: FileText, color: 'text-kemenag-700 bg-kemenag-50', link: null },
     { label: 'Bank Soal PAI', value: data.questions.length, icon: BookOpen, color: 'text-emerald-700 bg-emerald-50', link: '/admin/questions' },
@@ -120,6 +137,16 @@ export const DashboardPage = () => {
               <p className="text-xs text-slate-500">Kelola token masuk, durasi pengerjaan, dan status ujian.</p>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Wrench}
+                onClick={handleCheckAndRepair}
+                loading={repairing}
+                className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+              >
+                Cek & Perbaiki Database
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -281,6 +308,64 @@ export const DashboardPage = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Modal Laporan Cek & Perbaiki Database */}
+      {showRepairModal && repairResult && (
+        <Modal
+          isOpen={showRepairModal}
+          onClose={() => setShowRepairModal(false)}
+          title="Hasil Pemeriksaan & Perbaikan Database (Google Sheets)"
+        >
+          <div className="space-y-4">
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3 text-emerald-900 text-xs">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-emerald-800">{repairResult.message}</p>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  Seluruh tabel database (5 sheet) diperiksa: jika baris 1 kosong atau belum ada, header resmi otomatis diisikan dan diformat warna Kemenag hijau.
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-hidden border border-slate-200 rounded-2xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold uppercase text-[10px]">
+                  <tr>
+                    <th className="px-3.5 py-2.5">Nama Sheet</th>
+                    <th className="px-3.5 py-2.5">Tindakan / Status Header</th>
+                    <th className="px-3.5 py-2.5 text-center">Total Baris</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(repairResult.report || []).map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50">
+                      <td className="px-3.5 py-2.5 font-bold text-slate-800 flex items-center gap-2">
+                        <Database className="w-3.5 h-3.5 text-kemenag-600" />
+                        {item.sheet}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-slate-600">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          {item.action}
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-700">
+                        {item.totalRows}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Button variant="primary" onClick={() => setShowRepairModal(false)}>
+                Tutup & Lanjutkan
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </AdminLayout>
   );
 };

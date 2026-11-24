@@ -656,5 +656,34 @@ export const gasApi = {
       body: JSON.stringify({ action: 'deleteAdminUser', secretKey, adminId })
     });
     return await response.json();
+  },
+
+  /**
+   * Cek & Perbaiki Struktur Database Google Sheets
+   * - Memeriksa keberadaan 5 Sheet
+   * - Memeriksa kelengkapan dan format header di baris 1
+   * - Jika baris 1 kosong / hilang: langsung mengisi header standar Kemenag FITK UIN
+   * - Jika baris 1 berisi data: menyisipkan baris header di atasnya tanpa menghapus data
+   */
+  async checkAndRepairDatabase(secretKey) {
+    if (!this.isConfigured()) {
+      await new Promise(r => setTimeout(r, 600));
+      return {
+        status: 'success',
+        message: 'Pemeriksaan database lokal selesai. Seluruh 5 tabel dan header kolom dalam kondisi prima.',
+        report: [
+          { sheet: 'Sessions', status: 'OK', action: 'Header sudah sesuai & terformat', totalRows: 2, totalCols: 10 },
+          { sheet: 'Questions', status: 'OK', action: 'Header sudah sesuai & terformat', totalRows: 5, totalCols: 9 },
+          { sheet: 'Participants', status: 'OK', action: 'Header sudah sesuai & terformat', totalRows: 3, totalCols: 13 },
+          { sheet: 'Submissions', status: 'OK', action: 'Header sudah sesuai & terformat', totalRows: 1, totalCols: 9 },
+          { sheet: 'Admins', status: 'OK', action: 'Header sudah sesuai & terformat', totalRows: 3, totalCols: 7 }
+        ]
+      };
+    }
+
+    const response = await fetch(`${GAS_API_URL}?action=checkAndRepair&secretKey=${encodeURIComponent(secretKey || '')}`);
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal memeriksa database');
+    return data;
   }
 };
