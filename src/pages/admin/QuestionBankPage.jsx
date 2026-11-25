@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { gasApi } from '../../services/gasApi';
@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { downloadExcelTemplate, parseUploadedQuestionsFile } from '../../utils/excelTemplate';
-import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers } from 'lucide-react';
+import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers, CheckCircle2, Loader2, Database, Sparkles } from 'lucide-react';
 
 export const QuestionBankPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -21,8 +21,28 @@ export const QuestionBankPage = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
   const [importPreview, setImportPreview] = useState([]);
   const [importError, setImportError] = useState('');
+  const [importProgress, setImportProgress] = useState({
+    active: false,
+    current: 0,
+    total: 0,
+    percentage: 0,
+    currentQuestion: null,
+    logs: [],
+    isCompleted: false,
+    successCount: 0,
+    failCount: 0
+  });
+
+  const logContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [importProgress.logs, importProgress.current]);
 
   const [form, setForm] = useState({
     paket: '',
@@ -82,6 +102,7 @@ export const QuestionBankPage = () => {
 
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
+    setSavingManual(true);
     try {
       await gasApi.saveQuestion(adminSecretKey, form);
       setShowModal(false);
@@ -103,6 +124,8 @@ export const QuestionBankPage = () => {
       loadData();
     } catch (err) {
       alert('Gagal menyimpan soal: ' + err.message);
+    } finally {
+      setSavingManual(false);
     }
   };
 
@@ -111,6 +134,17 @@ export const QuestionBankPage = () => {
     const file = e.target.files[0];
     if (!file) return;
     setImportError('');
+    setImportProgress({
+      active: false,
+      current: 0,
+      total: 0,
+      percentage: 0,
+      currentQuestion: null,
+      logs: [],
+      isCompleted: false,
+      successCount: 0,
+      failCount: 0
+    });
     try {
       const parsed = await parseUploadedQuestionsFile(file);
       setImportPreview(parsed);
@@ -120,26 +154,104 @@ export const QuestionBankPage = () => {
     }
   };
 
-  // Eksekusi Batch Save Soal Hasil Import
+  // Eksekusi Simpan Soal Hasil Import dengan Live Incremental Progress Bar & Database Logs
   const handleExecuteImport = async () => {
     if (importPreview.length === 0) return;
     setImporting(true);
-    try {
-      for (const q of importPreview) {
+    const totalItems = importPreview.length;
+
+    setImportProgress({
+      active: true,
+      current: 1,
+      total: totalItems,
+      percentage: 0,
+      currentQuestion: importPreview[0],
+      logs: [],
+      isCompleted: false,
+      successCount: 0,
+      failCount: 0
+    });
+
+    let succCount = 0;
+    let failCount = 0;
+    const runningLogs = [];
+
+    for (let i = 0; i < totalItems; i++) {
+      const q = importPreview[i];
+      const qNum = i + 1;
+      const qPaket = q.paket || 'Pretest';
+
+      // Item yang saat ini sedang dikirim dan ditulis ke Google Sheets
+      const currentLogItem = {
+        index: qNum,
+        paket: qPaket,
+        text: q.question_text,
+        status: 'saving'
+      };
+
+      setImportProgress(prev => ({
+        ...prev,
+        current: qNum,
+        currentQuestion: q,
+        percentage: Math.round(((qNum - 1) / totalItems) * 100),
+        logs: [...runningLogs, currentLogItem]
+      }));
+
+      try {
         await gasApi.saveQuestion(adminSecretKey, {
           ...q,
-          paket: q.paket || 'Pretest'
+          paket: qPaket
         });
+        succCount++;
+        currentLogItem.status = 'success';
+        runningLogs.push(currentLogItem);
+      } catch (err) {
+        failCount++;
+        currentLogItem.status = 'error';
+        currentLogItem.error = err.message || 'Gagal masuk database';
+        runningLogs.push(currentLogItem);
       }
-      setShowImportModal(false);
-      setImportPreview([]);
-      alert(`Berhasil mengimpor ${importPreview.length} butir soal ke Bank Soal!`);
-      loadData();
-    } catch (err) {
-      alert('Gagal mengimpor soal: ' + err.message);
-    } finally {
-      setImporting(false);
+
+      setImportProgress(prev => ({
+        ...prev,
+        percentage: Math.round((qNum / totalItems) * 100),
+        successCount: succCount,
+        failCount: failCount,
+        logs: [...runningLogs]
+      }));
     }
+
+    setImportProgress(prev => ({
+      ...prev,
+      percentage: 100,
+      isCompleted: true,
+      successCount: succCount,
+      failCount: failCount
+    }));
+    setImporting(false);
+    loadData();
+  };
+
+  const handleCloseImportModal = () => {
+    if (importing) {
+      if (!window.confirm('Proses pengiriman soal ke database sedang berjalan. Tetap ingin menutup?')) {
+        return;
+      }
+    }
+    setShowImportModal(false);
+    setImportPreview([]);
+    setImportError('');
+    setImportProgress({
+      active: false,
+      current: 0,
+      total: 0,
+      percentage: 0,
+      currentQuestion: null,
+      logs: [],
+      isCompleted: false,
+      successCount: 0,
+      failCount: 0
+    });
   };
 
   const handleDelete = async (qId) => {
@@ -355,91 +467,261 @@ export const QuestionBankPage = () => {
       {/* Modal Import Soal dari Excel (.xlsx) */}
       <Modal
         isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        title="Import Bank Soal dari File Excel (.xlsx)"
+        onClose={handleCloseImportModal}
+        title={importProgress.active ? "Progres Penyimpanan Soal ke Database" : "Import Bank Soal dari File Excel (.xlsx)"}
         maxWidth="max-w-2xl"
       >
-        <div className="space-y-4">
-          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1.5">
-            <h5 className="font-bold flex items-center gap-1.5">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              Petunjuk Format Kolom Excel (.xlsx):
-            </h5>
-            <p>
-              Kolom template: <code>No, Paket, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Kunci_Jawaban, Bobot</code>.
-            </p>
-            <p className="text-emerald-800">
-              Isi kolom <strong>Paket</strong> dengan <strong>Pretest</strong> atau <strong>Postest</strong>. Soal akan otomatis terkelompokkan ke dalam paket masing-masing saat diimpor!
-            </p>
-            <button
-              onClick={downloadExcelTemplate}
-              className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
-            >
-              Unduh Template Bank Soal Di Sini (.xlsx)
-            </button>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Pilih File Excel (.xlsx / .xls) dari Komputer:
-            </label>
-            <input
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              onChange={handleSelectExcelFile}
-              className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-kemenag-50 file:text-kemenag-700 hover:file:bg-kemenag-100 cursor-pointer"
-            />
-          </div>
-
-          {importError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{importError}</span>
-            </div>
-          )}
-
-          {/* Pratinjau Soal yang Terdeteksi */}
-          {importPreview.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>Pratinjau Soal ({importPreview.length} butir terdeteksi):</span>
-                <span className="text-emerald-600 font-medium">Siap Diimpor</span>
+        {importProgress.active ? (
+          /* TAMPILAN PROGRES BERTAHAP MASUK KE SISTEM & DATABASE */
+          <div className="space-y-4">
+            {/* Banner Status */}
+            <div className={`p-4 rounded-2xl border transition-all ${
+              importProgress.isCompleted
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-emerald-50/70 border-emerald-200/80'
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                    importProgress.isCompleted
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-kemenag-600 text-white shadow-kemenag-200'
+                  }`}>
+                    {importProgress.isCompleted ? (
+                      <CheckCircle2 className="w-6 h-6" />
+                    ) : (
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">
+                      {importProgress.isCompleted
+                        ? 'Seluruh Soal Berhasil Masuk ke Database!'
+                        : 'Sedang Menyimpan Soal ke Database Google Sheets'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {importProgress.isCompleted
+                        ? `${importProgress.successCount} soal sukses tersimpan di Google Sheets.${importProgress.failCount > 0 ? ` (${importProgress.failCount} butir gagal)` : ''}`
+                        : `Memproses butir ${importProgress.current} dari ${importProgress.total} soal...`}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className={`text-2xl font-black ${importProgress.isCompleted ? 'text-emerald-700' : 'text-kemenag-700'}`}>
+                    {importProgress.percentage}%
+                  </span>
+                </div>
               </div>
-              <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-2xl divide-y text-xs p-2 bg-slate-50">
-                {importPreview.map((item, idx) => (
-                  <div key={idx} className="p-2 space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-800">#{idx + 1}</span>
-                      <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px] uppercase">
-                        {item.paket || 'Pretest'}
+            </div>
+
+            {/* Progress Bar Dinamis */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-600">
+                <span className="flex items-center gap-1.5">
+                  <Database className={`w-3.5 h-3.5 ${importProgress.isCompleted ? 'text-emerald-600' : 'text-kemenag-600 animate-pulse'}`} />
+                  Progress Sinkronisasi Database
+                </span>
+                <span className="font-bold text-slate-700">
+                  {importProgress.logs.filter(l => l.status === 'success').length} / {importProgress.total} Tersimpan
+                </span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-3.5 overflow-hidden p-0.5 border border-slate-200 shadow-inner">
+                <div
+                  className="bg-gradient-to-r from-emerald-500 via-teal-500 to-kemenag-600 h-full rounded-full transition-all duration-300 ease-out shadow-sm"
+                  style={{ width: `${importProgress.percentage}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Soal yang sedang aktif dikirim (Live Preview) */}
+            {!importProgress.isCompleted && importProgress.currentQuestion && (
+              <div className="p-3 bg-amber-50/70 border border-amber-200/90 rounded-2xl space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                    Sedang menulis baris ke database Google Sheets:
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-200/90 text-amber-900 font-bold text-[10px] uppercase">
+                    {importProgress.currentQuestion.paket || 'Pretest'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-800 line-clamp-1 italic font-medium">
+                  "#{importProgress.current}: {importProgress.currentQuestion.question_text}"
+                </p>
+              </div>
+            )}
+
+            {/* Log / Checklist Bertahap Real-Time */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Status Riwayat Masuk Database:
+                </span>
+                <span className="text-[11px] text-slate-400 font-normal">Auto-scroll live update</span>
+              </div>
+              <div
+                ref={logContainerRef}
+                className="max-h-60 overflow-y-auto border border-slate-200 rounded-2xl p-2 bg-slate-50/70 space-y-1.5 shadow-inner"
+              >
+                {importProgress.logs.map((log) => (
+                  <div
+                    key={log.index}
+                    className={`p-2.5 rounded-xl transition-all flex items-start justify-between gap-3 ${
+                      log.status === 'saving'
+                        ? 'bg-amber-50 border border-amber-300 shadow-sm'
+                        : log.status === 'success'
+                        ? 'bg-white border border-emerald-200 shadow-sm'
+                        : 'bg-rose-50 border border-rose-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-slate-100 border border-slate-200 font-bold text-slate-700 text-xs flex items-center justify-center shrink-0">
+                        {log.index}
                       </span>
-                      <span className="px-1.5 py-0.5 rounded bg-slate-200 uppercase font-semibold text-[10px]">
-                        {item.type}
-                      </span>
-                      <span className="text-emerald-700 font-mono font-bold">Kunci: {item.key_answer}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase">
+                            {log.paket}
+                          </span>
+                          <span className="text-slate-800 text-xs font-medium truncate max-w-[340px]">
+                            {log.text}
+                          </span>
+                        </div>
+                        {log.error && (
+                          <p className="text-[11px] text-rose-600 mt-0.5 font-medium">{log.error}</p>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-slate-700 truncate">{item.question_text}</p>
+
+                    <div className="shrink-0 flex items-center">
+                      {log.status === 'saving' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-bold animate-pulse">
+                          <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
+                          Menyimpan...
+                        </span>
+                      )}
+                      {log.status === 'success' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Masuk DB
+                        </span>
+                      )}
+                      {log.status === 'error' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 text-[11px] font-bold">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                          Gagal
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-          )}
 
-          <div className="flex gap-2 pt-2 border-t border-slate-100">
-            <Button variant="secondary" className="flex-1" onClick={() => setShowImportModal(false)}>
-              Batal
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-1"
-              disabled={importPreview.length === 0 || importing}
-              onClick={handleExecuteImport}
-              icon={Check}
-            >
-              {importing ? 'Mengimpor...' : `Simpan ${importPreview.length} Soal`}
-            </Button>
+            {/* Tombol Aksi */}
+            <div className="pt-2 border-t border-slate-100">
+              {importProgress.isCompleted ? (
+                <Button
+                  variant="primary"
+                  className="w-full py-2.5 text-sm font-bold"
+                  onClick={handleCloseImportModal}
+                  icon={Check}
+                >
+                  Selesai & Muat Ulang Bank Soal
+                </Button>
+              ) : (
+                <div className="p-3 bg-slate-100 rounded-xl text-center text-xs text-slate-500 font-semibold flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-kemenag-600" />
+                  <span>Sedang memproses penyimpanan ke database cloud. Mohon jangan menutup halaman ini...</span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          /* FORM PILIH FILE & PREVIEW SEBELUM IMPOR */
+          <div className="space-y-4">
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1.5">
+              <h5 className="font-bold flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                Petunjuk Format Kolom Excel (.xlsx):
+              </h5>
+              <p>
+                Kolom template: <code>No, Paket, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Opsi_E, Kunci_Jawaban, Bobot</code>.
+              </p>
+              <p className="text-emerald-800">
+                Isi kolom <strong>Paket</strong> dengan <strong>Pretest</strong> atau <strong>Postest</strong>. Soal akan otomatis terkelompokkan ke dalam paket masing-masing saat diimpor!
+              </p>
+              <button
+                onClick={downloadExcelTemplate}
+                className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
+              >
+                Unduh Template Bank Soal Di Sini (.xlsx)
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Pilih File Excel (.xlsx / .xls) dari Komputer:
+              </label>
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleSelectExcelFile}
+                className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-kemenag-50 file:text-kemenag-700 hover:file:bg-kemenag-100 cursor-pointer"
+              />
+            </div>
+
+            {importError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{importError}</span>
+              </div>
+            )}
+
+            {/* Pratinjau Soal yang Terdeteksi */}
+            {importPreview.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                  <span>Pratinjau Soal ({importPreview.length} butir terdeteksi):</span>
+                  <span className="text-emerald-600 font-medium">Siap Diimpor</span>
+                </div>
+                <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-2xl divide-y text-xs p-2 bg-slate-50">
+                  {importPreview.map((item, idx) => (
+                    <div key={idx} className="p-2 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-800">#{idx + 1}</span>
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px] uppercase">
+                          {item.paket || 'Pretest'}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 uppercase font-semibold text-[10px]">
+                          {item.type}
+                        </span>
+                        <span className="text-emerald-700 font-mono font-bold">Kunci: {item.key_answer}</span>
+                      </div>
+                      <p className="text-slate-700 truncate">{item.question_text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2 border-t border-slate-100">
+              <Button variant="secondary" className="flex-1" onClick={handleCloseImportModal}>
+                Batal
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={importPreview.length === 0 || importing}
+                onClick={handleExecuteImport}
+                icon={Check}
+              >
+                {importing ? 'Mengimpor...' : `Mulai Simpan ${importPreview.length} Soal`}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal Tambah Soal Manual */}
@@ -562,12 +844,26 @@ export const QuestionBankPage = () => {
             />
           </div>
 
+          {savingManual && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2 animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
+              <span>Sedang memproses dan menyimpan butir soal ke database Google Sheets...</span>
+            </div>
+          )}
+
           <div className="flex gap-2 pt-3">
-            <Button variant="secondary" className="flex-1" onClick={() => setShowModal(false)}>
+            <Button variant="secondary" className="flex-1" onClick={() => setShowModal(false)} disabled={savingManual}>
               Batal
             </Button>
-            <Button variant="primary" type="submit" className="flex-1">
-              Simpan Soal
+            <Button variant="primary" type="submit" className="flex-1" disabled={savingManual}>
+              {savingManual ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Menyimpan ke Database...
+                </span>
+              ) : (
+                'Simpan Soal'
+              )}
             </Button>
           </div>
         </form>
