@@ -488,11 +488,43 @@ function isRotatingTokenMatch(inputToken, sessionId, staticToken) {
   return clean === t0 || clean === t1 || clean === td0 || clean === td1;
 }
 
+/**
+ * Invalidation Cache Ujian ketika Admin Mengubah Data (Tahap 2)
+ */
+function clearExamCache(sessionId) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const commonPakets = ['pretest', 'postest', 'all', 'paket 1', 'paket 2', 'paket a', 'paket b'];
+    if (sessionId) {
+      commonPakets.forEach(function(p) {
+        cache.remove('q_master_' + sessionId + '_' + p);
+      });
+      cache.remove('sess_id_' + sessionId);
+      cache.remove('scoring_keys_' + sessionId);
+    }
+    cache.remove('all_sessions_cache');
+  } catch (e) {}
+}
+
 function handleGetSession(token, sessionSalt) {
   if (!token) return { status: 'error', message: 'Token tidak boleh kosong' };
   
+  const cleanToken = String(token).trim().toUpperCase();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'sess_token_' + cleanToken;
+
+  // 1. Cek RAM CacheService untuk respons kilat (0 ms Google Sheets)
+  const cachedSess = cache.get(cacheKey);
+  if (cachedSess) {
+    try {
+      const parsedSess = JSON.parse(cachedSess);
+      return { status: 'success', session: parsedSess, cached: true };
+    } catch (e) {}
+  }
+
+  // 2. Jika belum ada di cache, baca dari spreadsheet
   const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
-  let session = sessions.find(s => String(s.token).trim().toUpperCase() === String(token).trim().toUpperCase());
+  let session = sessions.find(s => String(s.token).trim().toUpperCase() === cleanToken);
 
   if (!session) {
     session = sessions.find(s => isRotatingTokenMatch(token, s.session_id, s.token));
@@ -511,71 +543,119 @@ function handleGetSession(token, sessionSalt) {
     return { status: 'error', message: 'Sesi ujian ini sedang nonaktif atau sudah ditutup' };
   }
 
+  const sessionObj = {
+    session_id: session.session_id,
+    title: session.title,
+    type: session.type,
+    token: session.token,
+    duration_minutes: Number(session.duration_minutes),
+    shuffle_questions: String(session.shuffle_questions).toUpperCase() === 'TRUE',
+    shuffle_options: String(session.shuffle_options).toUpperCase() === 'TRUE',
+    show_score: String(session.show_score).toUpperCase() === 'TRUE'
+  };
+
+  // Simpan ke RAM cache selama 30 menit (1800 detik)
+  try {
+    cache.put(cacheKey, JSON.stringify(sessionObj), 1800);
+  } catch (e) {}
+
   return {
     status: 'success',
-    session: {
-      session_id: session.session_id,
-      title: session.title,
-      type: session.type,
-      token: session.token,
-      duration_minutes: Number(session.duration_minutes),
-      shuffle_questions: String(session.shuffle_questions).toUpperCase() === 'TRUE',
-      shuffle_options: String(session.shuffle_options).toUpperCase() === 'TRUE',
-      show_score: String(session.show_score).toUpperCase() === 'TRUE'
-    }
+    session: sessionObj
   };
 }
 
+/**
+ * Pengambilan Soal Ujian dengan Akselerasi RAM Caching (Tahap 2)
+ * Ribuan request peserta disajikan dari RAM tanpa menyentuh Google Sheets!
+ */
 function handleGetExamQuestions(token, participantId, paket) {
   const sessionRes = handleGetSession(token);
   if (sessionRes.status !== 'success') return sessionRes;
 
   const session = sessionRes.session;
-  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS);
+  const targetPaket = String(paket || session.type || 'Pretest').trim().toLowerCase();
+  const cache = CacheService.getScriptCache();
+  const qCacheKey = 'q_master_' + session.session_id + '_' + targetPaket;
 
-  let targetQuestions = allQuestions;
-  if (paket) {
-    const byPaket = allQuestions.filter(q => String(q.paket || 'Pretest').toLowerCase() === String(paket).toLowerCase());
-    if (byPaket.length > 0) targetQuestions = byPaket;
-  }
+  let safeMasterQuestions = null;
 
-  if (targetQuestions.length === 0) {
-    return { status: 'error', message: 'Belum ada soal pada paket ujian ini' };
-  }
-
-  // Sensor kunci jawaban!
-  let safeQuestions = targetQuestions.map(q => {
-    let parsedOptions = [];
+  // 1. Cek apakah master soal untuk sesi & paket ini sudah ada di RAM Cache
+  const cachedQ = cache.get(qCacheKey);
+  if (cachedQ) {
     try {
-      parsedOptions = typeof q.options_json === 'string' ? JSON.parse(q.options_json) : (q.options_json || []);
-    } catch(e) {
-      parsedOptions = [];
+      safeMasterQuestions = JSON.parse(cachedQ);
+    } catch (e) {
+      safeMasterQuestions = null;
+    }
+  }
+
+  // 2. Jika belum ada di RAM Cache, baca dari Google Sheets dan proses sekali saja
+  if (!safeMasterQuestions || safeMasterQuestions.length === 0) {
+    const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS);
+    let targetQuestions = allQuestions;
+    if (paket) {
+      const byPaket = allQuestions.filter(q => String(q.paket || 'Pretest').toLowerCase() === targetPaket);
+      if (byPaket.length > 0) targetQuestions = byPaket;
     }
 
-    if (session.shuffle_options && parsedOptions.length > 0 && q.type !== 'essay') {
-      parsedOptions = shuffleArray(parsedOptions);
+    if (targetQuestions.length === 0) {
+      return { status: 'error', message: 'Belum ada soal pada paket ujian ini' };
     }
 
+    // Sensor kunci jawaban & bersihkan struktur opsi
+    safeMasterQuestions = targetQuestions.map(function(q) {
+      let parsedOptions = [];
+      try {
+        parsedOptions = typeof q.options_json === 'string' ? JSON.parse(q.options_json) : (q.options_json || []);
+      } catch(e) {
+        parsedOptions = [];
+      }
+
+      return {
+        question_id: q.question_id,
+        paket: q.paket || 'Pretest',
+        type: q.type,
+        question_text: q.question_text,
+        image_url: q.image_url || '',
+        options: parsedOptions,
+        weight: Number(q.weight) || 1
+      };
+    });
+
+    // Simpan ke RAM Cache selama 30 menit (1800 detik)
+    try {
+      cache.put(qCacheKey, JSON.stringify(safeMasterQuestions), 1800);
+    } catch (e) {}
+  }
+
+  // 3. Terapkan pengacakan unik per peserta (dari master soal yang diambil dari RAM)
+  let participantQuestions = safeMasterQuestions.map(function(q) {
+    let opts = q.options ? q.options.slice() : [];
+    if (session.shuffle_options && opts.length > 0 && q.type !== 'essay') {
+      opts = shuffleArray(opts);
+    }
     return {
       question_id: q.question_id,
-      paket: q.paket || 'Pretest',
+      paket: q.paket,
       type: q.type,
       question_text: q.question_text,
-      image_url: q.image_url || '',
-      options: parsedOptions,
-      weight: Number(q.weight) || 1
+      image_url: q.image_url,
+      options: opts,
+      weight: q.weight
     };
   });
 
   if (session.shuffle_questions) {
-    safeQuestions = shuffleArray(safeQuestions);
+    participantQuestions = shuffleArray(participantQuestions);
   }
 
   return {
     status: 'success',
     session: session,
-    questions: safeQuestions,
-    paket: paket || 'Pretest'
+    questions: participantQuestions,
+    paket: paket || 'Pretest',
+    cached: !!cachedQ
   };
 }
 
@@ -626,9 +706,23 @@ function handleSubmitExam(payload) {
     return { status: 'error', message: 'Data submission tidak lengkap' };
   }
 
-  const ss = getSpreadsheet();
-  const questions = getSheetDataAsObjects(SHEETS.QUESTIONS)
-    .filter(q => String(q.session_id) === String(sessionId));
+  const cache = CacheService.getScriptCache();
+  const scoringCacheKey = 'scoring_keys_' + sessionId;
+  let questions = null;
+
+  // 1. Ambil master scoring keys dari RAM Cache jika ada (Akselerasi Tahap 2)
+  const cachedKeys = cache.get(scoringCacheKey);
+  if (cachedKeys) {
+    try { questions = JSON.parse(cachedKeys); } catch (e) {}
+  }
+
+  if (!questions || questions.length === 0) {
+    questions = getSheetDataAsObjects(SHEETS.QUESTIONS)
+      .filter(q => String(q.session_id) === String(sessionId));
+    try {
+      cache.put(scoringCacheKey, JSON.stringify(questions), 1800);
+    } catch (e) {}
+  }
 
   const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS)
     .find(s => String(s.session_id) === String(sessionId));
@@ -667,26 +761,41 @@ function handleSubmitExam(payload) {
   const submissionId = 'SUB-' + new Date().getTime();
   const submittedAt = new Date().toISOString();
 
+  const ss = getSpreadsheet();
   const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
-  subSheet.appendRow([
-    submissionId,
-    participantId,
-    sessionId,
-    JSON.stringify(userAnswers),
-    pgScoreCalculated,
-    initialEssayScore,
-    totalScore,
-    Number(violations) || 0,
-    submittedAt
-  ]);
 
-  const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
-  const partRows = partSheet.getDataRange().getValues();
-  for (let i = 1; i < partRows.length; i++) {
-    if (String(partRows[i][0]) === String(participantId)) {
-      partSheet.getRange(i + 1, 9).setValue('submitted');
-      break;
+  // 2. Pasang LockService antrean aman agar puluhan peserta mengumpulkan serentak 100% bebas crash
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000); // Tunggu antrean aman maksimal 10 detik
+
+    subSheet.appendRow([
+      submissionId,
+      participantId,
+      sessionId,
+      JSON.stringify(userAnswers),
+      pgScoreCalculated,
+      initialEssayScore,
+      totalScore,
+      Number(violations) || 0,
+      submittedAt
+    ]);
+
+    const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+    if (partSheet) {
+      const partRows = partSheet.getDataRange().getValues();
+      const statusCol = HEADERS.Participants.indexOf('status') + 1; // 1-based index
+      const colToUpdate = statusCol > 0 ? statusCol : 13;
+
+      for (let i = 1; i < partRows.length; i++) {
+        if (String(partRows[i][0]) === String(participantId)) {
+          partSheet.getRange(i + 1, colToUpdate).setValue('submitted');
+          break;
+        }
+      }
     }
+  } finally {
+    lock.releaseLock();
   }
 
   const showScore = sessionData ? (String(sessionData.show_score).toUpperCase() === 'TRUE') : false;
@@ -882,6 +991,7 @@ function handleSaveSession(payload) {
     sheet.appendRow(rowData);
   }
 
+  clearExamCache(sessionId);
   return { status: 'success', message: 'Sesi ujian berhasil disimpan', sessionId: sessionId };
 }
 
@@ -940,6 +1050,7 @@ function handleDeleteSession(payload) {
     }
   }
 
+  clearExamCache(sessionId);
   return {
     status: 'success',
     message: `Sesi "${sessionTitle || sessionId}" berhasil dihapus.${archivedCount > 0 ? ` Sebanyak ${archivedCount} riwayat nilai berhasil diarsipkan.` : ''}`,
@@ -1067,6 +1178,7 @@ function handleSaveQuestion(payload) {
     sheet.appendRow(rowData);
   }
 
+  clearExamCache(sessionId);
   return { status: 'success', message: 'Soal berhasil disimpan', questionId: qId };
 }
 
@@ -1131,6 +1243,7 @@ function handleBatchSaveQuestions(payload) {
     sheet.getRange(startRow, 1, rowsToAppend.length, HEADERS.Questions.length).setValues(rowsToAppend);
   }
 
+  clearExamCache(sessionId);
   return {
     status: 'success',
     message: `Berhasil memproses ${questions.length} butir soal (${rowsToAppend.length} baru ditambahkan, ${updatedCount} diperbarui) secara instan.`,
@@ -1151,6 +1264,7 @@ function handleDeleteQuestion(payload) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) === String(questionId)) {
       sheet.deleteRow(i + 1);
+      clearExamCache();
       return { status: 'success', message: 'Soal berhasil dihapus' };
     }
   }
@@ -1195,6 +1309,7 @@ function handleDeleteQuestionsByPaket(payload) {
     }
   }
 
+  clearExamCache(sessionId);
   return {
     status: 'success',
     deletedCount: deletedCount,
