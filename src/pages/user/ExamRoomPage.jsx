@@ -32,6 +32,8 @@ export const ExamRoomPage = () => {
     submitting,
     violations,
     registerViolation,
+    proctorMessage,
+    clearProctorMessage,
     loadQuestions,
     submitExam
   } = useExam();
@@ -216,7 +218,37 @@ export const ExamRoomPage = () => {
         </div>
       </main>
 
-      {/* Modal Peringatan Anti-Cheat */}
+      {/* Modal Peringatan / Teguran dari Pengawas Ujian */}
+      {proctorMessage && (
+        <Modal
+          isOpen={!!proctorMessage}
+          onClose={clearProctorMessage}
+          title="Pesan dari Pengawas Ujian"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 text-center p-2">
+            <div className="w-14 h-14 mx-auto rounded-3xl bg-rose-100 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-8 h-8 animate-bounce" />
+            </div>
+            <div>
+              <h4 className="text-base font-black text-rose-950">Teguran / Instruksi Pengawas</h4>
+              <p className="text-xs text-rose-900 font-semibold mt-2 leading-relaxed bg-rose-50 p-3 rounded-2xl border border-rose-200">
+                "{proctorMessage}"
+              </p>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Harap patuhi instruksi pengawas dan tetap fokus pada lembar soal. Pelanggaran berulang dapat mengakibatkan diskualifikasi.
+            </p>
+            <Button
+              variant="primary"
+              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              onClick={clearProctorMessage}
+            >
+              Saya Mengerti & Lanjutkan Ujian
+            </Button>
+          </div>
+        </Modal>
+      )}
       <ViolationModal
         isOpen={showWarning}
         onClose={closeWarning}

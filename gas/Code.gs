@@ -49,6 +49,9 @@ function doGet(e) {
       case 'getAdminUsers':
         responseData = handleGetAdminUsers(params.secretKey);
         break;
+      case 'getLiveProctor':
+        responseData = handleGetLiveProctor(params);
+        break;
       default:
         responseData = { status: 'error', message: 'Invalid GET action: ' + action };
     }
@@ -135,6 +138,15 @@ function doPost(e) {
         break;
       case 'restoreFullBackup':
         responseData = handleRestoreFullBackup(payload);
+        break;
+      case 'updateExamProgress':
+        responseData = handleUpdateExamProgress(payload);
+        break;
+      case 'getLiveProctor':
+        responseData = handleGetLiveProctor(payload);
+        break;
+      case 'proctorAction':
+        responseData = handleProctorAction(payload);
         break;
       default:
         responseData = { status: 'error', message: 'Invalid POST action: ' + action };
@@ -1061,21 +1073,71 @@ function handleSaveQuestion(payload) {
 function handleBatchSaveQuestions(payload) {
   const { secretKey, sessionId, questions } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
-  if (!questions || !Array.isArray(questions)) return { status: 'error', message: 'Data soal kosong' };
-
-  let count = 0;
-  for (let i = 0; i < questions.length; i++) {
-    handleSaveQuestion({
-      secretKey: secretKey,
-      question: {
-        ...questions[i],
-        session_id: sessionId || questions[i].session_id || 'SES-001'
-      }
-    });
-    count++;
+  if (!questions || !Array.isArray(questions) || questions.length === 0) {
+    return { status: 'error', message: 'Data soal kosong' };
   }
 
-  return { status: 'success', message: `Berhasil menyimpan ${count} butir soal` };
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.QUESTIONS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.QUESTIONS);
+    sheet.appendRow(HEADERS.Questions);
+    formatHeaderRow(sheet, HEADERS.Questions.length);
+  } else if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS.Questions);
+    formatHeaderRow(sheet, HEADERS.Questions.length);
+  }
+
+  const existingData = sheet.getDataRange().getValues();
+  const existingMap = {};
+  for (let i = 1; i < existingData.length; i++) {
+    const rowQId = String(existingData[i][0]).trim();
+    if (rowQId) existingMap[rowQId] = i + 1;
+  }
+
+  const rowsToAppend = [];
+  let updatedCount = 0;
+  const nowEpoch = new Date().getTime();
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const qId = q.question_id || ('Q-' + nowEpoch + '-' + (i + 1) + '-' + Math.floor(Math.random() * 1000));
+    const targetSessionId = sessionId || q.session_id || 'SES-001';
+    const optionsJson = typeof q.options === 'string' ? q.options : JSON.stringify(q.options || []);
+
+    const rowData = [
+      qId,
+      targetSessionId,
+      q.paket || 'Pretest',
+      q.type || 'single_choice',
+      q.question_text || '',
+      q.image_url || '',
+      optionsJson,
+      String(q.key_answer || '').trim().toUpperCase(),
+      Number(q.weight) || 1
+    ];
+
+    if (existingMap[qId]) {
+      sheet.getRange(existingMap[qId], 1, 1, rowData.length).setValues([rowData]);
+      updatedCount++;
+    } else {
+      rowsToAppend.push(rowData);
+    }
+  }
+
+  // Tulis seluruh baris baru SEKALIGUS (Single 2D Matrix Call) - Super Cepat!
+  if (rowsToAppend.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rowsToAppend.length, HEADERS.Questions.length).setValues(rowsToAppend);
+  }
+
+  return {
+    status: 'success',
+    message: `Berhasil memproses ${questions.length} butir soal (${rowsToAppend.length} baru ditambahkan, ${updatedCount} diperbarui) secara instan.`,
+    total: questions.length,
+    inserted: rowsToAppend.length,
+    updated: updatedCount
+  };
 }
 
 function handleDeleteQuestion(payload) {
@@ -1300,20 +1362,81 @@ function handleSaveParticipant(payload) {
 }
 
 function handleBatchSaveParticipants(payload) {
-  const { secretKey, participants } = payload;
+  const { secretKey, sessionId, participants } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
-  if (!participants || !Array.isArray(participants)) return { status: 'error', message: 'Data peserta kosong' };
-
-  let count = 0;
-  for (let i = 0; i < participants.length; i++) {
-    handleSaveParticipant({
-      secretKey: secretKey,
-      participant: participants[i]
-    });
-    count++;
+  if (!participants || !Array.isArray(participants) || participants.length === 0) {
+    return { status: 'error', message: 'Data peserta kosong' };
   }
 
-  return { status: 'success', message: `Berhasil menyimpan ${count} data peserta` };
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.PARTICIPANTS);
+    sheet.appendRow(HEADERS.Participants);
+    formatHeaderRow(sheet, HEADERS.Participants.length);
+  } else if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS.Participants);
+    formatHeaderRow(sheet, HEADERS.Participants.length);
+  }
+
+  const existingData = sheet.getDataRange().getValues();
+  const existingMap = {};
+  for (let i = 1; i < existingData.length; i++) {
+    const rowPId = String(existingData[i][0]).trim();
+    const rowUsername = String(existingData[i][2]).trim().toLowerCase();
+    if (rowPId) existingMap[rowPId] = i + 1;
+    if (rowUsername) existingMap[rowUsername] = i + 1;
+  }
+
+  const rowsToAppend = [];
+  let updatedCount = 0;
+  const now = new Date().toISOString();
+  const nowEpoch = new Date().getTime();
+
+  for (let i = 0; i < participants.length; i++) {
+    const p = participants[i];
+    const pId = p.participant_id || ('P-' + nowEpoch + '-' + (i + 1) + '-' + Math.floor(Math.random() * 1000));
+    const targetSessionId = sessionId || p.session_id || 'SES-001';
+    const cleanUsername = String(p.username || pId).trim();
+
+    const rowData = [
+      pId,
+      targetSessionId,
+      cleanUsername,
+      p.password || 'kemenag2026',
+      p.full_name || cleanUsername,
+      p.gender || 'Laki-Laki',
+      p.identifier || cleanUsername,
+      p.kelas || 'Kelas A',
+      p.institution || '',
+      p.paket || 'Pretest',
+      p.token_used || '',
+      p.start_time || now,
+      p.status || 'registered'
+    ];
+
+    const existingRow = existingMap[pId] || existingMap[cleanUsername.toLowerCase()];
+    if (existingRow) {
+      sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+      updatedCount++;
+    } else {
+      rowsToAppend.push(rowData);
+    }
+  }
+
+  // Tulis seluruh baris baru SEKALIGUS (Single 2D Matrix Call) - Super Cepat!
+  if (rowsToAppend.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rowsToAppend.length, HEADERS.Participants.length).setValues(rowsToAppend);
+  }
+
+  return {
+    status: 'success',
+    message: `Berhasil memproses ${participants.length} data peserta (${rowsToAppend.length} baru, ${updatedCount} diperbarui) secara instan.`,
+    total: participants.length,
+    inserted: rowsToAppend.length,
+    updated: updatedCount
+  };
 }
 
 function handleDeleteParticipant(payload) {
@@ -1331,4 +1454,169 @@ function handleDeleteParticipant(payload) {
     }
   }
   return { status: 'error', message: 'Peserta tidak ditemukan' };
+}
+
+/**
+ * Update Progress Ujian Real-Time & Laporan Kecurangan (Heartbeat)
+ * Disimpan di CacheService (RAM) untuk performa instan tanpa membebani spreadsheet.
+ */
+function handleUpdateExamProgress(payload) {
+  const { participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg } = payload;
+  if (!participantId || !sessionId) {
+    return { status: 'error', message: 'Data heartbeat tidak lengkap' };
+  }
+
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + sessionId;
+  let proctorData = {};
+  const cachedStr = cache.get(cacheKey);
+  if (cachedStr) {
+    try { proctorData = JSON.parse(cachedStr); } catch (e) { proctorData = {}; }
+  }
+
+  const existing = proctorData[participantId] || {};
+  const now = new Date().toISOString();
+
+  // Ambil proctor commands jika ada (misal peringatan dari pengawas)
+  const pendingCommand = existing.pendingCommand || null;
+
+  proctorData[participantId] = {
+    participantId: participantId,
+    sessionId: sessionId,
+    answeredCount: Number(answeredCount) || existing.answeredCount || 0,
+    totalQuestions: Number(totalQuestions) || existing.totalQuestions || 25,
+    violations: Number(violations) || existing.violations || 0,
+    lastViolationMsg: lastViolationMsg || existing.lastViolationMsg || '',
+    lastHeartbeat: now,
+    status: existing.status || 'in_progress',
+    pendingCommand: null // clear once delivered
+  };
+
+  // Cache berlaku selama 3 jam (10800 detik)
+  cache.put(cacheKey, JSON.stringify(proctorData), 10800);
+
+  return {
+    status: 'success',
+    pendingCommand: pendingCommand,
+    serverTime: now
+  };
+}
+
+/**
+ * Ambil Data Pengawasan Real-Time (Live Proctoring Data)
+ * Menggabungkan data dari CacheService (RAM real-time) dan data spreadsheet (Peserta & Submissions)
+ */
+function handleGetLiveProctor(payload) {
+  const { secretKey, sessionId } = payload;
+  if (!verifyAdminSecret(secretKey)) {
+    return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
+  }
+
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
+  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS);
+  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
+
+  const activeSession = sessions.find(s => !sessionId || String(s.session_id) === String(sessionId)) || sessions[0];
+  const targetSessionId = activeSession ? activeSession.session_id : (sessionId || 'SES-001');
+
+  // Ambil cache live proctor
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + targetSessionId;
+  let proctorData = {};
+  const cachedStr = cache.get(cacheKey);
+  if (cachedStr) {
+    try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+  }
+
+  // Filter peserta untuk sesi ini
+  const targetParts = participants.filter(p => !p.session_id || String(p.session_id) === String(targetSessionId));
+  const targetSubs = submissions.filter(s => String(s.session_id) === String(targetSessionId));
+  const subMap = {};
+  targetSubs.forEach(function(s) { subMap[s.participant_id] = s; });
+
+  const nowEpoch = new Date().getTime();
+
+  const liveList = targetParts.map(function(p) {
+    const pId = p.participant_id;
+    const live = proctorData[pId] || {};
+    const sub = subMap[pId];
+
+    const isSubmitted = !!sub || String(p.status).toLowerCase() === 'submitted';
+    let status = isSubmitted ? 'submitted' : (p.status || 'registered');
+
+    // Cek apakah peserta aktif (heartbeat dalam 60 detik terakhir)
+    let isOnline = false;
+    if (live.lastHeartbeat) {
+      const hbDiffSec = (nowEpoch - new Date(live.lastHeartbeat).getTime()) / 1000;
+      if (hbDiffSec <= 60 && !isSubmitted) {
+        isOnline = true;
+        status = 'in_progress';
+      }
+    }
+
+    return {
+      participant_id: pId,
+      session_id: targetSessionId,
+      username: p.username,
+      full_name: p.full_name,
+      gender: p.gender || 'Laki-Laki',
+      kelas: p.kelas || 'Kelas A',
+      institution: p.institution || '',
+      paket: p.paket || 'Pretest',
+      start_time: p.start_time,
+      status: status,
+      is_online: isOnline,
+      answered_count: live.answeredCount || (sub ? Object.keys(JSON.parse(sub.answers_json || '{}')).length : 0),
+      total_questions: live.totalQuestions || 25,
+      violations: Number(sub ? sub.tab_switch_count : (live.violations || 0)),
+      last_violation_msg: live.lastViolationMsg || '',
+      last_heartbeat: live.lastHeartbeat || null,
+      score: sub ? (Number(sub.total_score) || Number(sub.pg_score) || 0) : null
+    };
+  });
+
+  return {
+    status: 'success',
+    sessionId: targetSessionId,
+    session: activeSession,
+    totalRegistered: targetParts.length,
+    activeCount: liveList.filter(l => l.status === 'in_progress').length,
+    submittedCount: liveList.filter(l => l.status === 'submitted').length,
+    violationCount: liveList.filter(l => l.violations > 0).length,
+    participants: liveList,
+    serverTime: new Date().toISOString()
+  };
+}
+
+/**
+ * Aksi Pengawas Ujian (Teguran, Paksa Kumpul, Buka Kunci)
+ */
+function handleProctorAction(payload) {
+  const { secretKey, sessionId, participantId, actionType, message } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + sessionId;
+  let proctorData = {};
+  const cachedStr = cache.get(cacheKey);
+  if (cachedStr) {
+    try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+  }
+
+  if (!proctorData[participantId]) {
+    proctorData[participantId] = { participantId: participantId, sessionId: sessionId };
+  }
+
+  proctorData[participantId].pendingCommand = {
+    actionType: actionType, // 'warn' | 'force_submit' | 'reset'
+    message: message || 'Peringatan dari pengawas ujian',
+    issuedAt: new Date().toISOString()
+  };
+
+  cache.put(cacheKey, JSON.stringify(proctorData), 10800);
+
+  return {
+    status: 'success',
+    message: `Aksi pengawas "${actionType}" berhasil dikirimkan ke peserta.`
+  };
 }

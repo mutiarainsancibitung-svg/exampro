@@ -165,7 +165,7 @@ export const QuestionBankPage = () => {
     }
   };
 
-  // Eksekusi Simpan Soal Hasil Import dengan Live Incremental Progress Bar & Database Logs
+  // Eksekusi Simpan Soal Hasil Import dengan Akselerasi Cepat (Bulk Batch Array 2D Matrix)
   const handleExecuteImport = async () => {
     if (importPreview.length === 0) return;
     setImporting(true);
@@ -175,73 +175,86 @@ export const QuestionBankPage = () => {
       active: true,
       current: 1,
       total: totalItems,
-      percentage: 0,
+      percentage: 25,
       currentQuestion: importPreview[0],
-      logs: [],
+      logs: [
+        {
+          index: 1,
+          paket: 'Sistem',
+          text: `Memvalidasi & Mengemas ${totalItems} butir soal ke paket Batch 2D Matrix...`,
+          status: 'saving'
+        }
+      ],
       isCompleted: false,
       successCount: 0,
       failCount: 0
     });
 
-    let succCount = 0;
-    let failCount = 0;
-    const runningLogs = [];
+    try {
+      const preparedQuestions = importPreview.map((q, idx) => ({
+        ...q,
+        session_id: q.session_id || 'SES-001',
+        paket: q.paket || 'Pretest'
+      }));
 
-    for (let i = 0; i < totalItems; i++) {
-      const q = importPreview[i];
-      const qNum = i + 1;
-      const qPaket = q.paket || 'Pretest';
+      setImportProgress(prev => ({
+        ...prev,
+        percentage: 60,
+        logs: [
+          ...prev.logs,
+          {
+            index: 2,
+            paket: 'Cloud GAS',
+            text: `Mengirim ${totalItems} butir soal ke Google Sheets dalam 1 kali eksekusi cepat...`,
+            status: 'saving'
+          }
+        ]
+      }));
 
-      // Item yang saat ini sedang dikirim dan ditulis ke Google Sheets
-      const currentLogItem = {
-        index: qNum,
-        paket: qPaket,
+      // Eksekusi Bulk Batch (1 Panggilan Jaringan & 1 Tulis Spreadsheet)
+      const res = await gasApi.batchSaveQuestions(adminSecretKey, preparedQuestions, 'SES-001');
+
+      // Tampilkan log sukses butir soal
+      const successLogs = preparedQuestions.map((q, idx) => ({
+        index: idx + 1,
+        paket: q.paket || 'Pretest',
         text: q.question_text,
-        status: 'saving'
-      };
-
-      setImportProgress(prev => ({
-        ...prev,
-        current: qNum,
-        currentQuestion: q,
-        percentage: Math.round(((qNum - 1) / totalItems) * 100),
-        logs: [...runningLogs, currentLogItem]
+        status: 'success'
       }));
 
-      try {
-        await gasApi.saveQuestion(adminSecretKey, {
-          ...q,
-          session_id: q.session_id || 'SES-001',
-          paket: qPaket
-        });
-        succCount++;
-        currentLogItem.status = 'success';
-        runningLogs.push(currentLogItem);
-      } catch (err) {
-        failCount++;
-        currentLogItem.status = 'error';
-        currentLogItem.error = err.message || 'Gagal masuk database';
-        runningLogs.push(currentLogItem);
-      }
+      setImportProgress({
+        active: true,
+        current: totalItems,
+        total: totalItems,
+        percentage: 100,
+        currentQuestion: preparedQuestions[totalItems - 1],
+        logs: successLogs,
+        isCompleted: true,
+        successCount: totalItems,
+        failCount: 0
+      });
 
+      await loadData();
+    } catch (err) {
       setImportProgress(prev => ({
         ...prev,
-        percentage: Math.round((qNum / totalItems) * 100),
-        successCount: succCount,
-        failCount: failCount,
-        logs: [...runningLogs]
+        isCompleted: true,
+        failCount: totalItems,
+        logs: [
+          ...prev.logs,
+          {
+            index: 999,
+            paket: 'Error',
+            text: 'Gagal import: ' + err.message,
+            status: 'error',
+            error: err.message
+          }
+        ]
       }));
+      alert('Gagal mengimpor batch soal: ' + err.message);
+    } finally {
+      setImporting(false);
     }
-
-    setImportProgress(prev => ({
-      ...prev,
-      percentage: 100,
-      isCompleted: true,
-      successCount: succCount,
-      failCount: failCount
-    }));
-    setImporting(false);
-    await loadData();
   };
 
   const handleCloseImportModal = () => {

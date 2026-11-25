@@ -326,6 +326,159 @@ export const gasApi = {
   },
 
   /**
+   * Kirim Heartbeat & Progres Ujian Real-Time dari Ruang Ujian Peserta
+   */
+  async updateExamProgress({ participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg }) {
+    if (!participantId || !sessionId) return { status: 'error' };
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      db.liveProctor = db.liveProctor || {};
+      const existing = db.liveProctor[participantId] || {};
+      const pendingCommand = existing.pendingCommand || null;
+
+      db.liveProctor[participantId] = {
+        participantId,
+        sessionId,
+        answeredCount: Number(answeredCount) || 0,
+        totalQuestions: Number(totalQuestions) || 25,
+        violations: Number(violations) || 0,
+        lastViolationMsg: lastViolationMsg || '',
+        lastHeartbeat: new Date().toISOString(),
+        status: 'in_progress',
+        pendingCommand: null
+      };
+      saveMockDb(db);
+      return { status: 'success', pendingCommand };
+    }
+
+    try {
+      const response = await fetch(getGasApiUrl(), {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'updateExamProgress',
+          participantId,
+          sessionId,
+          answeredCount,
+          totalQuestions,
+          violations,
+          lastViolationMsg
+        })
+      });
+      return await response.json();
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  },
+
+  /**
+   * Ambil Data Pengawasan Ujian Real-Time (Live Proctoring Data)
+   */
+  async getLiveProctor(secretKey, sessionId = '') {
+    if (!this.isConfigured()) {
+      await new Promise(r => setTimeout(r, 400));
+      const db = getMockDb();
+      const sess = db.sessions.find(s => !sessionId || s.session_id === sessionId) || db.sessions[0];
+      const targetSessionId = sess ? sess.session_id : 'SES-001';
+      const proctorData = db.liveProctor || {};
+      const nowEpoch = Date.now();
+
+      const participants = (db.participants || []).filter(
+        p => !p.session_id || p.session_id === targetSessionId
+      );
+
+      const liveList = participants.map(p => {
+        const pId = p.participant_id;
+        const live = proctorData[pId] || {};
+        const sub = (db.submissions || []).find(s => s.participant_id === pId && s.session_id === targetSessionId);
+        const isSubmitted = !!sub || p.status === 'submitted';
+
+        let status = isSubmitted ? 'submitted' : (p.status || 'registered');
+        let isOnline = false;
+        if (live.lastHeartbeat) {
+          const diffSec = (nowEpoch - new Date(live.lastHeartbeat).getTime()) / 1000;
+          if (diffSec <= 60 && !isSubmitted) {
+            isOnline = true;
+            status = 'in_progress';
+          }
+        }
+
+        return {
+          participant_id: pId,
+          session_id: targetSessionId,
+          username: p.username,
+          full_name: p.full_name,
+          gender: p.gender || 'Laki-Laki',
+          kelas: p.kelas || 'Kelas A',
+          institution: p.institution || '',
+          paket: p.paket || 'Pretest',
+          start_time: p.start_time,
+          status,
+          is_online: isOnline,
+          answered_count: live.answeredCount || (sub ? Object.keys(sub.answers || {}).length : 0),
+          total_questions: live.totalQuestions || 25,
+          violations: Number(sub ? sub.violations : (live.violations || 0)),
+          last_violation_msg: live.lastViolationMsg || '',
+          last_heartbeat: live.lastHeartbeat || null,
+          score: sub ? (sub.total_score || sub.pg_score || 0) : null
+        };
+      });
+
+      return {
+        status: 'success',
+        sessionId: targetSessionId,
+        session: sess,
+        totalRegistered: participants.length,
+        activeCount: liveList.filter(l => l.status === 'in_progress').length,
+        submittedCount: liveList.filter(l => l.status === 'submitted').length,
+        violationCount: liveList.filter(l => l.violations > 0).length,
+        participants: liveList,
+        serverTime: new Date().toISOString()
+      };
+    }
+
+    const response = await fetch(`${getGasApiUrl()}?action=getLiveProctor&secretKey=${encodeURIComponent(secretKey)}&sessionId=${encodeURIComponent(sessionId || '')}`);
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat monitor ujian');
+    return data;
+  },
+
+  /**
+   * Kirim Tindakan Pengawas (Teguran, Paksa Kumpul, Buka Kunci)
+   */
+  async sendProctorAction(secretKey, sessionId, participantId, actionType, message = '') {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      db.liveProctor = db.liveProctor || {};
+      if (!db.liveProctor[participantId]) {
+        db.liveProctor[participantId] = { participantId, sessionId };
+      }
+      db.liveProctor[participantId].pendingCommand = {
+        actionType,
+        message,
+        issuedAt: new Date().toISOString()
+      };
+      saveMockDb(db);
+      return { status: 'success', message: `Perintah "${actionType}" berhasil dikirimkan.` };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'proctorAction',
+        secretKey,
+        sessionId,
+        participantId,
+        actionType,
+        message
+      })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal mengirim tindakan pengawas');
+    return data;
+  },
+
+  /**
    * Otentikasi Login Admin (Mendukung Username & Password serta Secret Key)
    */
   async adminLogin(param) {

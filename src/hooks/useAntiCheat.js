@@ -16,7 +16,7 @@ export const useAntiCheat = ({ onViolation, isExamActive = true }) => {
     setViolationCount(prev => prev + 1);
     setWarningMessage(msg);
     setShowWarning(true);
-    if (onViolation) onViolation();
+    if (onViolation) onViolation(msg);
   }, [isExamActive, onViolation]);
 
   useEffect(() => {
