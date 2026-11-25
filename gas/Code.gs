@@ -312,8 +312,8 @@ function formatHeaderRow(sheet, numCols) {
   } catch (e) {}
 }
 
-function getSheetDataAsObjects(sheetName) {
-  const ss = getSpreadsheet();
+function getSheetDataAsObjects(sheetName, existingSs) {
+  const ss = existingSs || getSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     checkAndRepairDatabase();
@@ -321,23 +321,12 @@ function getSheetDataAsObjects(sheetName) {
     if (!sheet) return [];
   }
 
-  let rows = sheet.getDataRange().getValues();
-  if (rows.length === 0) {
-    checkAndRepairDatabase();
-    rows = sheet.getDataRange().getValues();
-    if (rows.length === 0) return [];
-  }
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow <= 1 || lastCol === 0) return [];
 
-  // Self-healing: jika baris 1 kosong atau bukan header standar, otomatis jalankan perbaikan
-  const expectedHeader0 = (HEADERS[sheetName] && HEADERS[sheetName][0]) || '';
-  if (rows.length >= 1 && expectedHeader0) {
-    const r1c0 = String(rows[0][0] || '').trim().toLowerCase();
-    if (r1c0 !== expectedHeader0.toLowerCase()) {
-      checkAndRepairDatabase();
-      rows = sheet.getDataRange().getValues();
-    }
-  }
-
+  // Optimal range read: Hanya membaca area cell data yang ada nilainya (Tahap 4)
+  const rows = sheet.getRange(1, 1, lastRow, lastCol).getValues();
   if (rows.length <= 1) return [];
 
   const headers = rows[0];
@@ -346,9 +335,13 @@ function getSheetDataAsObjects(sheetName) {
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     // Abaikan baris kosong
-    const isBlank = row.every(function(val) {
-      return val === '' || val === null || val === undefined;
-    });
+    let isBlank = true;
+    for (let c = 0; c < row.length; c++) {
+      if (row[c] !== '' && row[c] !== null && row[c] !== undefined) {
+        isBlank = false;
+        break;
+      }
+    }
     if (isBlank) continue;
 
     const obj = {};
@@ -717,14 +710,15 @@ function handleSubmitExam(payload) {
   }
 
   if (!questions || questions.length === 0) {
-    questions = getSheetDataAsObjects(SHEETS.QUESTIONS)
+    const ss = getSpreadsheet();
+    questions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss)
       .filter(q => String(q.session_id) === String(sessionId));
     try {
       cache.put(scoringCacheKey, JSON.stringify(questions), 1800);
     } catch (e) {}
   }
 
-  const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS)
+  const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS, getSpreadsheet())
     .find(s => String(s.session_id) === String(sessionId));
 
   const userAnswers = answers || {};
@@ -818,24 +812,36 @@ function handleGetAdminDashboard(secretKey) {
     return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
   }
 
-  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
-  const questions = getSheetDataAsObjects(SHEETS.QUESTIONS);
-  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
-  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS);
-  let admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  const ss = getSpreadsheet(); // 1 kali buka spreadsheet saja (Optimasi Tahap 4)
+
+  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS, ss);
+  const questions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss);
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss);
+  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
+  let admins = getSheetDataAsObjects(SHEETS.ADMINS, ss);
   if (!admins || admins.length === 0) {
-    initializeDefaultAdmins();
-    admins = getSheetDataAsObjects(SHEETS.ADMINS);
+    initializeDefaultAdmins(ss);
+    admins = getSheetDataAsObjects(SHEETS.ADMINS, ss);
   }
 
-  const parsedQuestions = questions.map(q => {
+  const parsedQuestions = questions.map(function(q) {
     let opts = [];
     try {
       opts = typeof q.options_json === 'string' ? JSON.parse(q.options_json) : (q.options_json || []);
     } catch(e) {
       opts = [];
     }
-    return { ...q, options: opts };
+    return {
+      question_id: q.question_id,
+      session_id: q.session_id,
+      paket: q.paket || 'Pretest',
+      type: q.type || 'single_choice',
+      question_text: q.question_text || '',
+      image_url: q.image_url || '',
+      options: opts,
+      key_answer: q.key_answer || '',
+      weight: Number(q.weight) || 1
+    };
   });
 
   return {
@@ -848,26 +854,23 @@ function handleGetAdminDashboard(secretKey) {
   };
 }
 
-function initializeDefaultAdmins() {
-  const ss = getSpreadsheet();
+function initializeDefaultAdmins(existingSs) {
+  const ss = existingSs || getSpreadsheet();
   let sheet = ss.getSheetByName(SHEETS.ADMINS);
   if (!sheet) {
     sheet = ss.insertSheet(SHEETS.ADMINS);
     sheet.appendRow(HEADERS.Admins);
-    sheet.getRange(1, 1, 1, HEADERS.Admins.length)
-      .setFontWeight('bold')
-      .setBackground('#0D7A5F')
-      .setFontColor('#FFFFFF');
+    formatHeaderRow(sheet, HEADERS.Admins.length);
   }
 
-  const rows = sheet.getDataRange().getValues();
-  if (rows.length <= 1) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
     const defaultAdmins = [
       ['ADM-001', 'admin', 'admin123', 'Administrator Utama', 'superadmin', true, new Date().toISOString()],
       ['ADM-002', 'dosen_pai', 'guru2026', 'Dosen PAI Pengampu', 'instructor', true, new Date().toISOString()],
       ['ADM-003', 'pengawas01', 'proctor2026', 'Pengawas Ruang Ujian', 'proctor', true, new Date().toISOString()]
     ];
-    defaultAdmins.forEach(row => sheet.appendRow(row));
+    defaultAdmins.forEach(function(row) { sheet.appendRow(row); });
   }
 }
 
@@ -875,10 +878,11 @@ function handleGetAdminUsers(secretKey) {
   if (!verifyAdminSecret(secretKey)) {
     return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
   }
-  let admins = getSheetDataAsObjects(SHEETS.ADMINS);
+  const ss = getSpreadsheet();
+  let admins = getSheetDataAsObjects(SHEETS.ADMINS, ss);
   if (!admins || admins.length === 0) {
-    initializeDefaultAdmins();
-    admins = getSheetDataAsObjects(SHEETS.ADMINS);
+    initializeDefaultAdmins(ss);
+    admins = getSheetDataAsObjects(SHEETS.ADMINS, ss);
   }
   return { status: 'success', admins: admins };
 }
@@ -1062,14 +1066,15 @@ function handleExportFullBackup(payload) {
   const { secretKey } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
 
+  const ss = getSpreadsheet();
   return {
     status: 'success',
     exportedAt: new Date().toISOString(),
-    sessions: getSheetDataAsObjects(SHEETS.SESSIONS),
-    questions: getSheetDataAsObjects(SHEETS.QUESTIONS),
-    participants: getSheetDataAsObjects(SHEETS.PARTICIPANTS),
-    submissions: getSheetDataAsObjects(SHEETS.SUBMISSIONS),
-    admins: getSheetDataAsObjects(SHEETS.ADMINS)
+    sessions: getSheetDataAsObjects(SHEETS.SESSIONS, ss),
+    questions: getSheetDataAsObjects(SHEETS.QUESTIONS, ss),
+    participants: getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss),
+    submissions: getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss),
+    admins: getSheetDataAsObjects(SHEETS.ADMINS, ss)
   };
 }
 
@@ -1627,9 +1632,10 @@ function handleGetLiveProctor(payload) {
     return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
   }
 
-  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
-  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS);
-  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
+  const ss = getSpreadsheet();
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss);
+  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
+  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS, ss);
 
   const activeSession = sessions.find(s => !sessionId || String(s.session_id) === String(sessionId)) || sessions[0];
   const targetSessionId = activeSession ? activeSession.session_id : (sessionId || 'SES-001');
