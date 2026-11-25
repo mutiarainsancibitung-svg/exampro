@@ -275,8 +275,7 @@ export const PARTICIPANT_HEADERS = [
   'Jenis_Kelamin',
   'NIP_NIM',
   'Kelas',
-  'Asal_Madrasah_Sekolah',
-  'Paket'
+  'Asal_Madrasah_Sekolah'
 ];
 
 export const SAMPLE_PARTICIPANTS = [
@@ -288,8 +287,7 @@ export const SAMPLE_PARTICIPANTS = [
     'Laki-Laki',
     '198501012010121001',
     'Kelas A',
-    'MAN 1 Kota Jakarta',
-    'Pretest'
+    'MAN 1 Kota Jakarta'
   ],
   [
     2,
@@ -299,19 +297,17 @@ export const SAMPLE_PARTICIPANTS = [
     'Perempuan',
     '199002152015032002',
     'Kelas A',
-    'MTsN 2 Jakarta Selatan',
-    'Pretest'
+    'MTsN 2 Jakarta Selatan'
   ],
   [
     3,
     'guru_pai_03',
     'kemenag2026',
     'Muhammad Rasyid, M.Pd.I',
-    'Laki-Laki',
+    '-',
     '198807122014021003',
     'Kelas B',
-    'SMAN 4 Jakarta Barat',
-    'Postest'
+    'SMAN 4 Jakarta Barat'
   ]
 ];
 
@@ -331,12 +327,45 @@ export const downloadParticipantExcelTemplate = () => {
     { wch: 15 }, // Jenis_Kelamin
     { wch: 22 }, // NIP_NIM
     { wch: 14 }, // Kelas
-    { wch: 30 }, // Asal_Madrasah_Sekolah
-    { wch: 14 }  // Paket
+    { wch: 32 }  // Asal_Madrasah_Sekolah
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Data_Peserta');
   XLSX.writeFile(wb, 'Template_Data_Peserta_PAI.xlsx');
+};
+
+/**
+ * Unduh File Excel (.xlsx) Seluruh Data Peserta untuk Cadangan (Backup)
+ */
+export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta_ExamPro.xlsx') => {
+  const wb = XLSX.utils.book_new();
+  const rows = (participants || []).map((p, idx) => [
+    idx + 1,
+    p.username || '',
+    p.password || 'kemenag2026',
+    p.full_name || p.username || '',
+    (p.gender && p.gender !== '-') ? p.gender : '-',
+    p.identifier || '',
+    p.kelas || '-',
+    p.institution || ''
+  ]);
+
+  const wsData = [PARTICIPANT_HEADERS, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 18 },
+    { wch: 16 },
+    { wch: 32 },
+    { wch: 15 },
+    { wch: 22 },
+    { wch: 14 },
+    { wch: 32 }
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Peserta');
+  XLSX.writeFile(wb, filename);
 };
 
 /**
@@ -357,8 +386,8 @@ export const parseUploadedParticipantFile = async (file) => {
   const idxUser = headerRow.findIndex(h => h.includes('username') || h.includes('user'));
   const idxPass = headerRow.findIndex(h => h.includes('password') || h.includes('pass'));
   const idxName = headerRow.findIndex(h => h.includes('nama'));
-  const idxGender = headerRow.findIndex(h => h.includes('kelamin') || h.includes('gender'));
-  const idxId = headerRow.findIndex(h => h.includes('nip') || h.includes('nim') || h.includes('id'));
+  const idxGender = headerRow.findIndex(h => h.includes('kelamin') || h.includes('gender') || h.includes('jk'));
+  const idxId = headerRow.findIndex(h => h.includes('nip') || h.includes('nim') || h.includes('nik') || h.includes('id'));
   const idxKelas = headerRow.findIndex(h => h.includes('kelas') || h.includes('rombel') || h.includes('group'));
   const idxSchool = headerRow.findIndex(h => h.includes('asal') || h.includes('madrasah') || h.includes('sekolah') || h.includes('instansi'));
   const idxPaket = headerRow.findIndex(h => h.includes('paket'));
@@ -372,18 +401,40 @@ export const parseUploadedParticipantFile = async (file) => {
     const username = (idxUser !== -1 ? String(row[idxUser] || '') : String(row[1] || '')).trim();
     const password = (idxPass !== -1 ? String(row[idxPass] || '') : String(row[2] || '')).trim();
     const fullName = (idxName !== -1 ? String(row[idxName] || '') : String(row[3] || '')).trim();
-    const gender = (idxGender !== -1 ? String(row[idxGender] || '') : String(row[4] || '')).trim();
+    
+    // Gender jika kosong diisi '-'
+    const rawGender = (idxGender !== -1 ? String(row[idxGender] || '') : String(row[4] || '')).trim();
+    const cleanGender = (rawGender && rawGender !== '-' && rawGender.toLowerCase() !== 'null' && rawGender.toLowerCase() !== 'undefined')
+      ? rawGender
+      : '-';
+
     const identifier = (idxId !== -1 ? String(row[idxId] || '') : String(row[5] || '')).trim();
-    const kelas = (idxKelas !== -1 ? String(row[idxKelas] || '') : String(row[6] || '')).trim() || 'Kelas A';
-    const institution = (idxSchool !== -1 ? String(row[idxSchool] || '') : String(row[7] || '')).trim();
-    const paket = (idxPaket !== -1 ? String(row[idxPaket] || '') : String(row[8] || '')).trim() || 'Pretest';
+    
+    // Penanganan Kelas vs Asal Sekolah agar nama sekolah tidak salah masuk ke kolom kelas
+    let kelas = '-';
+    if (idxKelas !== -1) {
+      kelas = String(row[idxKelas] || '').trim() || '-';
+    }
+
+    let institution = '';
+    if (idxSchool !== -1) {
+      institution = String(row[idxSchool] || '').trim();
+    } else if (idxKelas === -1 && row[6] !== undefined) {
+      // Jika kolom kelas tidak ada dan ada kolom ke-6, gunakan sebagai nama instansi
+      institution = String(row[6] || '').trim();
+    } else if (row[7] !== undefined) {
+      institution = String(row[7] || '').trim();
+    }
+
+    // Paket dari Excel (jika ada kolom paket dibaca, jika tidak ada default '-')
+    const paket = idxPaket !== -1 ? (String(row[idxPaket] || '').trim() || '-') : '-';
 
     if (username || fullName) {
       parsedParticipants.push({
         username: username,
         password: password || 'kemenag2026',
         full_name: fullName || username,
-        gender: gender || 'Laki-Laki',
+        gender: cleanGender,
         identifier: identifier || username,
         kelas: kelas,
         institution: institution,

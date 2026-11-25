@@ -111,6 +111,12 @@ function doPost(e) {
       case 'deleteParticipant':
         responseData = handleDeleteParticipant(payload);
         break;
+      case 'batchDeleteParticipants':
+        responseData = handleBatchDeleteParticipants(payload);
+        break;
+      case 'deleteAllParticipants':
+        responseData = handleDeleteAllParticipants(payload);
+        break;
       case 'deleteQuestion':
         responseData = handleDeleteQuestion(payload);
         break;
@@ -1456,21 +1462,25 @@ function handleSaveParticipant(payload) {
     }
   }
 
-  const rowData = [
-    pId,
-    participant.session_id || 'SES-001',
-    participant.username || '',
-    participant.password || 'kemenag2026',
-    participant.full_name || participant.username || '',
-    participant.gender || 'Laki-Laki',
-    participant.identifier || participant.username || '',
-    participant.kelas || 'Kelas A',
-    participant.institution || '',
-    participant.paket || 'Pretest',
-    participant.token_used || '',
-    participant.start_time || new Date().toISOString(),
-    participant.status || 'registered'
-  ];
+    const cleanGender = (participant.gender && String(participant.gender).trim() && String(participant.gender).trim() !== '-')
+      ? String(participant.gender).trim()
+      : '-';
+
+    const rowData = [
+      pId,
+      participant.session_id || 'SES-001',
+      participant.username || '',
+      participant.password || 'kemenag2026',
+      participant.full_name || participant.username || '',
+      cleanGender,
+      participant.identifier || participant.username || '',
+      participant.kelas || '-',
+      participant.institution || '',
+      participant.paket || '-',
+      participant.token_used || '',
+      participant.start_time || new Date().toISOString(),
+      participant.status || 'registered'
+    ];
 
   if (existingRow > 0) {
     sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
@@ -1519,17 +1529,21 @@ function handleBatchSaveParticipants(payload) {
     const targetSessionId = sessionId || p.session_id || 'SES-001';
     const cleanUsername = String(p.username || pId).trim();
 
+    const cleanGender = (p.gender && String(p.gender).trim() && String(p.gender).trim() !== '-')
+      ? String(p.gender).trim()
+      : '-';
+
     const rowData = [
       pId,
       targetSessionId,
       cleanUsername,
       p.password || 'kemenag2026',
       p.full_name || cleanUsername,
-      p.gender || 'Laki-Laki',
+      cleanGender,
       p.identifier || cleanUsername,
-      p.kelas || 'Kelas A',
+      p.kelas || '-',
       p.institution || '',
-      p.paket || 'Pretest',
+      p.paket || '-',
       p.token_used || '',
       p.start_time || now,
       p.status || 'registered'
@@ -1574,6 +1588,63 @@ function handleDeleteParticipant(payload) {
     }
   }
   return { status: 'error', message: 'Peserta tidak ditemukan' };
+}
+
+function handleBatchDeleteParticipants(payload) {
+  const { secretKey, participantIds } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0) {
+    return { status: 'error', message: 'Daftar ID peserta kosong' };
+  }
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (!sheet) return { status: 'error', message: 'Sheet peserta tidak ditemukan' };
+
+  const idSet = {};
+  participantIds.forEach(id => {
+    if (id) idSet[String(id).trim()] = true;
+  });
+
+  const rows = sheet.getDataRange().getValues();
+  let deletedCount = 0;
+
+  // Hapus dari bawah ke atas agar indeks baris tidak bergeser saat baris dihapus
+  for (let i = rows.length - 1; i >= 1; i--) {
+    const rowId = String(rows[i][0]).trim();
+    if (idSet[rowId]) {
+      sheet.deleteRow(i + 1);
+      deletedCount++;
+    }
+  }
+
+  return {
+    status: 'success',
+    message: `Berhasil menghapus ${deletedCount} peserta terpilih.`,
+    deletedCount: deletedCount
+  };
+}
+
+function handleDeleteAllParticipants(payload) {
+  const { secretKey } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (!sheet) return { status: 'error', message: 'Sheet peserta tidak ditemukan' };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return { status: 'success', message: 'Data peserta sudah kosong.' };
+  }
+
+  // Hapus seluruh baris data dari baris ke-2 hingga baris terakhir
+  sheet.deleteRows(2, lastRow - 1);
+
+  return {
+    status: 'success',
+    message: `Berhasil menghapus seluruh data peserta (${lastRow - 1} baris).`
+  };
 }
 
 /**

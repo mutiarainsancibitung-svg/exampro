@@ -992,9 +992,11 @@ export const gasApi = {
           username: p.username || '',
           password: p.password || 'kemenag2026',
           full_name: p.full_name || p.username || '',
-          gender: p.gender || 'Laki-Laki',
+          gender: (p.gender && p.gender !== '-') ? p.gender : '-',
           identifier: p.identifier || p.username || '',
+          kelas: p.kelas || '-',
           institution: p.institution || '',
+          paket: p.paket || '-',
           status: 'registered'
         });
       }
@@ -1012,7 +1014,7 @@ export const gasApi = {
   },
 
   /**
-   * Hapus Data Peserta (Admin)
+   * Hapus Data Peserta Tunggal (Admin)
    */
   async deleteParticipant(secretKey, participantId) {
     if (!this.isConfigured()) {
@@ -1026,6 +1028,54 @@ export const gasApi = {
     const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteParticipant', secretKey, participantId })
+    });
+    this.clearDashboardCache();
+    return await response.json();
+  },
+
+  /**
+   * Hapus Banyak Data Peserta Sekaligus Berdasarkan Pilihan Ceklis (Admin)
+   */
+  async batchDeleteParticipants(secretKey, participantIds) {
+    if (!participantIds || participantIds.length === 0) {
+      return { status: 'success', message: 'Tidak ada peserta yang dipilih' };
+    }
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const idSet = new Set(participantIds.map(id => String(id)));
+      const initial = db.participants.length;
+      db.participants = db.participants.filter(p => !idSet.has(String(p.participant_id)));
+      const deletedCount = initial - db.participants.length;
+      saveMockDb(db);
+      this.clearDashboardCache();
+      return { status: 'success', message: `Berhasil menghapus ${deletedCount} peserta terpilih (mode lokal)`, deletedCount };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'batchDeleteParticipants', secretKey, participantIds })
+    });
+    this.clearDashboardCache();
+    return await response.json();
+  },
+
+  /**
+   * Hapus Seluruh Data Peserta Sekaligus (Admin)
+   */
+  async deleteAllParticipants(secretKey) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const deletedCount = db.participants.length;
+      db.participants = [];
+      saveMockDb(db);
+      this.clearDashboardCache();
+      return { status: 'success', message: `Berhasil menghapus seluruh data peserta (${deletedCount} orang, mode lokal)` };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteAllParticipants', secretKey })
     });
     this.clearDashboardCache();
     return await response.json();
