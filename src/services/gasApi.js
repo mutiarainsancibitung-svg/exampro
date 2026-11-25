@@ -620,6 +620,43 @@ export const gasApi = {
   },
 
   /**
+   * Hapus Seluruh Soal Berdasarkan Paket (Admin)
+   */
+  async deleteQuestionsByPaket(secretKey, paket, sessionId = null) {
+    if (!paket) throw new Error('Nama paket soal wajib diisi');
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const pClean = String(paket).trim().toLowerCase();
+      const initialCount = db.questions.length;
+      db.questions = db.questions.filter(q => {
+        const qPaket = String(q.paket || 'Pretest').trim().toLowerCase();
+        if (sessionId && q.session_id && String(q.session_id) !== String(sessionId)) {
+          return true;
+        }
+        return qPaket !== pClean;
+      });
+      const deletedCount = initialCount - db.questions.length;
+      saveMockDb(db);
+      return {
+        status: 'success',
+        deletedCount,
+        message: `Berhasil menghapus ${deletedCount} butir soal pada paket "${paket}".`
+      };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteQuestionsByPaket', secretKey, paket, sessionId })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') {
+      throw new Error(data.message || 'Gagal menghapus soal per paket.');
+    }
+    return data;
+  },
+
+  /**
    * Input Nilai Essay oleh Admin
    */
   async gradeEssay(secretKey, submissionId, essayScore) {

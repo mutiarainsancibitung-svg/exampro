@@ -7,8 +7,8 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { downloadExcelTemplate, parseUploadedQuestionsFile } from '../../utils/excelTemplate';
-import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers, CheckCircle2, Loader2, Database, Sparkles } from 'lucide-react';
+import { downloadExcelTemplate, parseUploadedQuestionsFile, exportQuestionsToExcel } from '../../utils/excelTemplate';
+import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers, CheckCircle2, Loader2, Database, Sparkles, AlertTriangle } from 'lucide-react';
 
 export const QuestionBankPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -37,6 +37,12 @@ export const QuestionBankPage = () => {
     successCount: 0,
     failCount: 0
   });
+
+  // State Hapus Soal per Paket
+  const [showDeletePaketModal, setShowDeletePaketModal] = useState(false);
+  const [targetDeletePaket, setTargetDeletePaket] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingPaket, setDeletingPaket] = useState(false);
 
   const logContainerRef = useRef(null);
 
@@ -270,6 +276,57 @@ export const QuestionBankPage = () => {
     }
   };
 
+  // Buka Modal Hapus Paket Soal
+  const handleOpenDeletePaket = (pkt) => {
+    const defaultPkt = pkt || (selectedPaket !== 'SEMUA' ? selectedPaket : (allPackages[0] || ''));
+    setTargetDeletePaket(defaultPkt);
+    setDeleteConfirmText('');
+    setShowDeletePaketModal(true);
+  };
+
+  // Unduh Backup Excel (.xlsx) Soal Paket Tertentu Sebelum Dihapus
+  const handleDownloadBackupPaket = () => {
+    if (!targetDeletePaket) return;
+    const pktQuestions = questions.filter(
+      q => (q.paket || 'Pretest').trim().toLowerCase() === targetDeletePaket.trim().toLowerCase()
+    );
+    if (pktQuestions.length === 0) {
+      alert(`Tidak ada soal pada paket "${targetDeletePaket}" untuk diunduh.`);
+      return;
+    }
+    exportQuestionsToExcel(
+      pktQuestions,
+      `Backup_Soal_${targetDeletePaket}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+  };
+
+  // Eksekusi Hapus Seluruh Butir Soal dalam Paket
+  const handleExecuteDeletePaket = async () => {
+    if (!targetDeletePaket) return;
+    const isConfirmed = deleteConfirmText.trim().toUpperCase() === 'HAPUS' ||
+      deleteConfirmText.trim().toLowerCase() === targetDeletePaket.trim().toLowerCase();
+
+    if (!isConfirmed) {
+      alert(`Harap ketik "HAPUS" atau nama paket "${targetDeletePaket}" untuk mengonfirmasi.`);
+      return;
+    }
+
+    setDeletingPaket(true);
+    try {
+      const res = await gasApi.deleteQuestionsByPaket(adminSecretKey, targetDeletePaket);
+      alert(res.message || `Berhasil menghapus seluruh soal pada paket "${targetDeletePaket}".`);
+      setShowDeletePaketModal(false);
+      if (selectedPaket.toLowerCase() === targetDeletePaket.toLowerCase()) {
+        setSelectedPaket('SEMUA');
+      }
+      await loadData();
+    } catch (err) {
+      alert('Gagal menghapus soal per paket: ' + err.message);
+    } finally {
+      setDeletingPaket(false);
+    }
+  };
+
   // Paket yang tersedia murni dibaca dari data soal yang diinput/diimpor
   const allPackages = Array.from(
     new Set(questions.map(q => q.paket?.trim()).filter(Boolean))
@@ -419,6 +476,20 @@ export const QuestionBankPage = () => {
               Import dari Excel (.xlsx)
             </Button>
 
+            {/* Tombol Hapus per Paket */}
+            {allPackages.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Trash2}
+                onClick={() => handleOpenDeletePaket(selectedPaket !== 'SEMUA' ? selectedPaket : '')}
+                title="Hapus seluruh butir soal dalam satu paket"
+                className="border-rose-300 text-rose-700 hover:bg-rose-50"
+              >
+                Hapus Soal per Paket
+              </Button>
+            )}
+
             {/* Tombol Tambah Soal Manual */}
             <Button
               variant="primary"
@@ -439,10 +510,19 @@ export const QuestionBankPage = () => {
 
         {/* List Soal Sesuai Paket yang Diklik */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 px-1">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
               Menampilkan {filteredQuestions.length} Soal untuk Paket: <span className="text-kemenag-700 font-extrabold">{selectedPaket}</span>
             </h4>
+            {selectedPaket !== 'SEMUA' && filteredQuestions.length > 0 && (
+              <button
+                onClick={() => handleOpenDeletePaket(selectedPaket)}
+                className="text-xs font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Hapus Seluruh Soal Paket {selectedPaket} ({filteredQuestions.length} Soal)
+              </button>
+            )}
           </div>
 
           {filteredQuestions.length === 0 ? (
@@ -919,6 +999,157 @@ export const QuestionBankPage = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Modal Konfirmasi Hapus Soal per Paket */}
+      {showDeletePaketModal && (
+        <Modal
+          isOpen={showDeletePaketModal}
+          onClose={() => {
+            if (!deletingPaket) {
+              setShowDeletePaketModal(false);
+              setDeleteConfirmText('');
+            }
+          }}
+          title="Hapus Seluruh Soal per Paket"
+          maxWidth="max-w-lg"
+        >
+          {(() => {
+            const targetQuestions = questions.filter(
+              q => (q.paket || 'Pretest').trim().toLowerCase() === (targetDeletePaket || '').trim().toLowerCase()
+            );
+            const pgCount = targetQuestions.filter(q => q.type === 'single_choice' || q.type === 'multiple_choice').length;
+            const essayCount = targetQuestions.filter(q => q.type === 'essay').length;
+            const totalWeight = targetQuestions.reduce((acc, curr) => acc + (Number(curr.weight) || 1), 0);
+            const isMatch = deleteConfirmText.trim().toUpperCase() === 'HAPUS' ||
+              (targetDeletePaket && deleteConfirmText.trim().toLowerCase() === targetDeletePaket.trim().toLowerCase());
+
+            return (
+              <div className="space-y-4">
+                {/* Pilih Paket yang ingin dihapus */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Pilih Paket Soal yang Akan Dihapus:
+                  </label>
+                  <select
+                    value={targetDeletePaket}
+                    onChange={(e) => {
+                      setTargetDeletePaket(e.target.value);
+                      setDeleteConfirmText('');
+                    }}
+                    disabled={deletingPaket}
+                    className="w-full px-3.5 py-2.5 rounded-2xl border border-slate-300 text-xs font-bold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  >
+                    {allPackages.map(p => {
+                      const c = questions.filter(q => (q.paket || 'Pretest').trim().toLowerCase() === p.toLowerCase()).length;
+                      return (
+                        <option key={p} value={p}>
+                          Paket: {p} ({c} Butir Soal)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Ringkasan Paket */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Nama Paket Terpilih:</span>
+                    <strong className="text-rose-700 font-extrabold px-2 py-0.5 rounded-lg bg-rose-50 border border-rose-200">
+                      {targetDeletePaket || '-'}
+                    </strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Total Butir Soal:</span>
+                    <strong className="text-slate-800 font-mono text-sm">{targetQuestions.length} Soal</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Komposisi:</span>
+                    <span className="text-slate-700 font-medium">{pgCount} Pilihan Ganda • {essayCount} Uraian/Esai</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Total Akumulasi Bobot:</span>
+                    <span className="text-slate-700 font-mono">{totalWeight} Poin</span>
+                  </div>
+                </div>
+
+                {/* Tombol Pengaman: Unduh Cadangan Excel Sebelum Hapus */}
+                <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-center justify-between gap-3">
+                  <div className="text-xs">
+                    <h5 className="font-bold text-emerald-900">Ingin Mengamankan Soal?</h5>
+                    <p className="text-[11px] text-emerald-700">Unduh cadangan Excel sebelum data dihapus permanen.</p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={Download}
+                    onClick={handleDownloadBackupPaket}
+                    disabled={deletingPaket || targetQuestions.length === 0}
+                    className="shrink-0 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  >
+                    Unduh Excel (.xlsx)
+                  </Button>
+                </div>
+
+                {/* Peringatan Bahaya */}
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-rose-900 space-y-1">
+                    <p className="font-bold">Peringatan Penghapusan Permanen!</p>
+                    <p className="text-[11px] leading-relaxed text-rose-800">
+                      Seluruh <strong>{targetQuestions.length} butir soal</strong> dalam paket <strong>"{targetDeletePaket}"</strong> akan dihapus dari Google Sheets dan tidak dapat dikembalikan kecuali diimpor ulang dari file Excel.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Input Konfirmasi Pengaman */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Ketik <span className="text-rose-600 font-mono font-black">HAPUS</span> atau <span className="text-rose-600 font-mono font-black">{targetDeletePaket}</span> untuk konfirmasi:
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    disabled={deletingPaket}
+                    placeholder={`Ketik HAPUS atau ${targetDeletePaket}`}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+
+                {/* Tombol Aksi */}
+                <div className="flex gap-2.5 pt-2 border-t border-slate-100">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => {
+                      setShowDeletePaketModal(false);
+                      setDeleteConfirmText('');
+                    }}
+                    disabled={deletingPaket}
+                  >
+                    Batal
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    disabled={!isMatch || deletingPaket || targetQuestions.length === 0}
+                    onClick={handleExecuteDeletePaket}
+                  >
+                    {deletingPaket ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Menghapus Soal...
+                      </span>
+                    ) : (
+                      `Ya, Hapus ${targetQuestions.length} Soal`
+                    )}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
 
       {/* Modal Pengaturan URL Google Apps Script */}
       <Modal

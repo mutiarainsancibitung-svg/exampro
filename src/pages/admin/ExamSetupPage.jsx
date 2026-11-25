@@ -7,6 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
+import { exportQuestionsToExcel } from '../../utils/excelTemplate';
 import * as XLSX from 'xlsx';
 import {
   Sliders,
@@ -47,6 +48,12 @@ export const ExamSetupPage = () => {
   const [sessionToDelete, setSessionToDelete] = useState(null);
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false);
   const [deletingSessionLoading, setDeletingSessionLoading] = useState(false);
+
+  // State Hapus Paket Soal & Auto-Backup
+  const [paketToDelete, setPaketToDelete] = useState(null);
+  const [showDeletePaketModal, setShowDeletePaketModal] = useState(false);
+  const [deletingPaketLoading, setDeletingPaketLoading] = useState(false);
+  const [deletePaketConfirmText, setDeletePaketConfirmText] = useState('');
 
   // Active Tab
   const [activeTab, setActiveTab] = useState('mapping'); // 'mapping' | 'activities' | 'questions'
@@ -259,6 +266,63 @@ export const ExamSetupPage = () => {
       alert('Gagal menghapus sesi: ' + err.message);
     } finally {
       setDeletingSessionLoading(false);
+    }
+  };
+
+  // Buka Modal Konfirmasi Hapus Paket Soal
+  const handleRequestDeletePaket = (pkg) => {
+    setPaketToDelete(pkg);
+    setDeletePaketConfirmText('');
+    setShowDeletePaketModal(true);
+  };
+
+  // Unduh Backup Soal Paket Sebelum Dihapus
+  const handleDownloadBackupPaketInSetup = () => {
+    if (!paketToDelete) return;
+    const pkgQuestions = questions.filter(
+      q => (q.paket || '').trim().toLowerCase() === paketToDelete.trim().toLowerCase()
+    );
+    if (pkgQuestions.length === 0) {
+      alert(`Tidak ada butir soal pada paket "${paketToDelete}" untuk diunduh.`);
+      return;
+    }
+    exportQuestionsToExcel(
+      pkgQuestions,
+      `Backup_Soal_${paketToDelete}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+  };
+
+  // Eksekusi Hapus Seluruh Butir Soal dalam Paket
+  const executeDeletePaketInSetup = async () => {
+    if (!paketToDelete) return;
+    const isConfirmed = deletePaketConfirmText.trim().toUpperCase() === 'HAPUS' ||
+      deletePaketConfirmText.trim().toLowerCase() === paketToDelete.trim().toLowerCase();
+
+    if (!isConfirmed) {
+      alert(`Harap ketik "HAPUS" atau nama paket "${paketToDelete}" untuk konfirmasi.`);
+      return;
+    }
+
+    setDeletingPaketLoading(true);
+    try {
+      const res = await gasApi.deleteQuestionsByPaket(adminSecretKey, paketToDelete);
+      alert(res.message || `Berhasil menghapus paket "${paketToDelete}".`);
+      setShowDeletePaketModal(false);
+      setPaketToDelete(null);
+
+      // Jika paket yang sedang dipilih di Langkah 2 adalah paket yang dihapus, reset pilihan
+      if (selectedPackage && selectedPackage.trim().toLowerCase() === paketToDelete.trim().toLowerCase()) {
+        const remaining = dynamicPackages.filter(p => p.toLowerCase() !== paketToDelete.toLowerCase());
+        if (remaining.length > 0) {
+          setSelectedPackage(remaining[0]);
+        }
+      }
+
+      loadData();
+    } catch (err) {
+      alert('Gagal menghapus paket soal: ' + err.message);
+    } finally {
+      setDeletingPaketLoading(false);
     }
   };
 
@@ -921,14 +985,22 @@ export const ExamSetupPage = () => {
                         }}
                         className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1"
                       >
-                        Gunakan Paket Ini untuk Pemetaan &rarr;
+                        Gunakan Pemetaan &rarr;
                       </button>
-                      <button
-                        onClick={() => navigate('/admin/questions')}
-                        className="text-xs text-slate-400 hover:text-slate-700"
-                      >
-                        Lihat Butir
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => navigate('/admin/questions')}
+                          className="text-xs text-slate-500 hover:text-slate-800 font-medium"
+                        >
+                          Lihat Butir
+                        </button>
+                        <button
+                          onClick={() => handleRequestDeletePaket(pkg)}
+                          className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Hapus
+                        </button>
+                      </div>
                     </div>
                   </Card>
                 );
@@ -1097,6 +1169,110 @@ export const ExamSetupPage = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Modal Hapus Paket Soal & Auto-Backup */}
+      {showDeletePaketModal && (
+        <Modal
+          isOpen={showDeletePaketModal}
+          onClose={() => {
+            if (!deletingPaketLoading) {
+              setShowDeletePaketModal(false);
+              setPaketToDelete(null);
+            }
+          }}
+          title="Konfirmasi Hapus Paket Soal"
+          maxWidth="max-w-lg"
+        >
+          {(() => {
+            const targetQuestions = questions.filter(
+              q => (q.paket || '').trim().toLowerCase() === (paketToDelete || '').trim().toLowerCase()
+            );
+            const isMatch = deletePaketConfirmText.trim().toUpperCase() === 'HAPUS' ||
+              (paketToDelete && deletePaketConfirmText.trim().toLowerCase() === paketToDelete.trim().toLowerCase());
+
+            return (
+              <div className="space-y-4">
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold">Paket yang akan dihapus:</span>
+                    <strong className="text-rose-700 font-bold px-2 py-0.5 rounded-lg bg-rose-50 border border-rose-200">
+                      {paketToDelete}
+                    </strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold">Jumlah Butir Soal Terkait:</span>
+                    <strong className="text-slate-800 font-mono text-sm">{targetQuestions.length} Butir Soal</strong>
+                  </div>
+                </div>
+
+                {/* Tombol Cadangan Excel */}
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3">
+                  <div className="text-xs">
+                    <h5 className="font-bold text-emerald-900">Amankan Soal Dahulu?</h5>
+                    <p className="text-[11px] text-emerald-700">Unduh berkas Excel sebelum seluruh butir dihapus.</p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={Download}
+                    onClick={handleDownloadBackupPaketInSetup}
+                    disabled={deletingPaketLoading || targetQuestions.length === 0}
+                    className="shrink-0 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  >
+                    Unduh Excel (.xlsx)
+                  </Button>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-rose-900 space-y-1">
+                    <p className="font-bold">Perhatian Penghapusan Permanen</p>
+                    <p className="text-[11px] text-rose-800 leading-relaxed">
+                      Seluruh <strong>{targetQuestions.length} butir soal</strong> dalam paket <strong>"{paketToDelete}"</strong> akan dihapus dari Google Sheets.
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Ketik <span className="text-rose-600 font-mono font-black">HAPUS</span> atau <span className="text-rose-600 font-mono font-black">{paketToDelete}</span> untuk konfirmasi:
+                  </label>
+                  <input
+                    type="text"
+                    value={deletePaketConfirmText}
+                    onChange={(e) => setDeletePaketConfirmText(e.target.value)}
+                    disabled={deletingPaketLoading}
+                    placeholder={`Ketik HAPUS atau ${paketToDelete}`}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={deletingPaketLoading}
+                    onClick={() => {
+                      setShowDeletePaketModal(false);
+                      setPaketToDelete(null);
+                    }}
+                  >
+                    Batalkan
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    disabled={!isMatch || deletingPaketLoading || targetQuestions.length === 0}
+                    onClick={executeDeletePaketInSetup}
+                  >
+                    {deletingPaketLoading ? 'Menghapus Soal...' : `Ya, Hapus ${targetQuestions.length} Soal`}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
     </AdminLayout>
   );
 };

@@ -111,6 +111,62 @@ export const downloadExcelTemplate = () => {
 };
 
 /**
+ * Unduh File Excel (.xlsx) untuk Backup Butir Soal per Paket
+ */
+export const exportQuestionsToExcel = (questions, filename = 'Backup_Soal.xlsx') => {
+  const wb = XLSX.utils.book_new();
+  const rows = (questions || []).map((q, idx) => {
+    let opts = [];
+    try {
+      opts = typeof q.options === 'string' ? JSON.parse(q.options) : (q.options || []);
+    } catch (e) {
+      opts = [];
+    }
+    const optA = opts.find(o => String(o.id).toUpperCase() === 'A')?.text || '';
+    const optB = opts.find(o => String(o.id).toUpperCase() === 'B')?.text || '';
+    const optC = opts.find(o => String(o.id).toUpperCase() === 'C')?.text || '';
+    const optD = opts.find(o => String(o.id).toUpperCase() === 'D')?.text || '';
+    const optE = opts.find(o => String(o.id).toUpperCase() === 'E')?.text || '';
+
+    return [
+      idx + 1,
+      q.paket || 'Pretest',
+      q.type || 'single_choice',
+      q.question_text || '',
+      q.image_url || '',
+      optA,
+      optB,
+      optC,
+      optD,
+      optE,
+      q.key_answer || 'A',
+      Number(q.weight) || 1
+    ];
+  });
+
+  const wsData = [QUESTION_HEADERS, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  ws['!cols'] = [
+    { wch: 6 },  // No
+    { wch: 14 }, // Paket
+    { wch: 16 }, // Jenis_Soal
+    { wch: 45 }, // Teks_Soal
+    { wch: 25 }, // Gambar_URL
+    { wch: 30 }, // Opsi_A
+    { wch: 30 }, // Opsi_B
+    { wch: 30 }, // Opsi_C
+    { wch: 30 }, // Opsi_D
+    { wch: 30 }, // Opsi_E
+    { wch: 15 }, // Kunci_Jawaban
+    { wch: 8 }   // Bobot
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Bank_Soal');
+  XLSX.writeFile(wb, filename);
+};
+
+/**
  * Parse File Excel (.xlsx / .xls / .csv) yang diunggah
  */
 export const parseUploadedQuestionsFile = async (file) => {

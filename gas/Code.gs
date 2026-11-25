@@ -111,6 +111,9 @@ function doPost(e) {
       case 'deleteQuestion':
         responseData = handleDeleteQuestion(payload);
         break;
+      case 'deleteQuestionsByPaket':
+        responseData = handleDeleteQuestionsByPaket(payload);
+        break;
       case 'gradeEssay':
         responseData = handleGradeEssay(payload);
         break;
@@ -1090,6 +1093,51 @@ function handleDeleteQuestion(payload) {
     }
   }
   return { status: 'error', message: 'Soal tidak ditemukan' };
+}
+
+/**
+ * Hapus Seluruh Butir Soal Berdasarkan Paket (Admin)
+ * Iterasi dilakukan mundur dari baris terakhir untuk mencegah pergeseran indeks.
+ */
+function handleDeleteQuestionsByPaket(payload) {
+  const { secretKey, paket, sessionId } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
+  if (!paket || !String(paket).trim()) {
+    return { status: 'error', message: 'Nama paket soal wajib diisi' };
+  }
+
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.QUESTIONS);
+  if (!sheet) return { status: 'error', message: 'Sheet Questions tidak ditemukan' };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return { status: 'success', deletedCount: 0, message: 'Tidak ada data soal untuk dihapus.' };
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  const targetPaket = String(paket).trim().toLowerCase();
+  let deletedCount = 0;
+
+  // Lakukan iterasi mundur dari baris terakhir ke baris 2 (index 1)
+  for (let i = rows.length - 1; i >= 1; i--) {
+    const rowSessionId = String(rows[i][1] || '').trim(); // Kolom B: session_id
+    const rowPaket = String(rows[i][2] || 'Pretest').trim().toLowerCase(); // Kolom C: paket
+
+    const matchPaket = (rowPaket === targetPaket);
+    const matchSession = !sessionId || (rowSessionId === String(sessionId).trim());
+
+    if (matchPaket && matchSession) {
+      sheet.deleteRow(i + 1);
+      deletedCount++;
+    }
+  }
+
+  return {
+    status: 'success',
+    deletedCount: deletedCount,
+    message: `Berhasil menghapus ${deletedCount} butir soal pada paket "${paket}".`
+  };
 }
 
 function handleGradeEssay(payload) {
