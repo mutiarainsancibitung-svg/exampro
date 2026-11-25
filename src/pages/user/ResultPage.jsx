@@ -14,7 +14,8 @@ export const ResultPage = () => {
 
   useEffect(() => {
     // Jalankan efek selebrasi confetti jika hasil skor ditampilkan
-    if (examResult?.showScore) {
+    const isHidden = examResult?.showScore === false;
+    if (!isHidden && examResult?.score) {
       import('canvas-confetti')
         .then((module) => {
           const confetti = module.default || module;
@@ -33,8 +34,10 @@ export const ResultPage = () => {
     navigate('/');
   };
 
-  const showScore = examResult?.showScore;
+  // Skor PG selalu ditampilkan langsung kecuali secara eksplisit dinonaktifkan (showScore === false)
+  const isHidden = examResult?.showScore === false;
   const score = examResult?.score;
+  const showScore = !isHidden && score;
 
   return (
     <div className="min-h-screen flex flex-col bg-mint-grid">
@@ -72,20 +75,24 @@ export const ResultPage = () => {
               </div>
             </div>
 
-            {/* Tampilan Skor Jika Diizinkan */}
+            {/* Tampilan Skor Jika Diizinkan (Soal PG langsung dimunculkan skornya) */}
             {showScore && score ? (
               <div className="p-6 rounded-3xl bg-kemenag-50 border border-kemenag-200 space-y-2">
                 <div className="flex items-center justify-center gap-1.5 text-kemenag-700 text-xs font-bold uppercase tracking-wider">
                   <Award className="w-4 h-4" />
-                  Perolehan Skor Sementara
+                  Perolehan Skor Ujian
                 </div>
                 <div className="text-5xl font-black text-kemenag-700 tracking-tight">
                   {score.pgScore}
                   <span className="text-xl font-normal text-kemenag-500">/100</span>
                 </div>
-                {score.hasEssay && (
+                {score.hasEssay ? (
                   <p className="text-[11px] text-kemenag-700 font-medium pt-1">
                     *Skor di atas adalah pilihan ganda. Jawaban essay sedang dalam proses review pengajar.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-emerald-700 font-semibold pt-1">
+                    Evaluasi pilihan ganda telah selesai dinilai secara otomatis.
                   </p>
                 )}
               </div>

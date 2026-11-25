@@ -216,11 +216,31 @@ export const LiveMonitorPage = () => {
   const rawParticipants = proctorData?.participants || [];
   const currentSession = sessions.find(s => s.session_id === selectedSessionId) || proctorData?.session;
 
+  // Deduplikasi peserta unik berdasarkan username / identifier / ID
+  // Memastikan total peserta tetap 38 dan tidak ada nama ganda di monitor
+  const uniqueParticipantsMap = new Map();
+  rawParticipants.forEach(p => {
+    const key = String(p.username || p.identifier || p.participant_id || '').trim().toLowerCase();
+    if (!key) return;
+    if (!uniqueParticipantsMap.has(key)) {
+      uniqueParticipantsMap.set(key, p);
+    } else {
+      const existing = uniqueParticipantsMap.get(key);
+      const isCurrentActive = p.status === 'submitted' || p.status === 'in_progress';
+      const isExistingActive = existing.status === 'submitted' || existing.status === 'in_progress';
+      // Prioritaskan baris yang memiliki status lebih aktif (submitted > in_progress > registered)
+      if (isCurrentActive && (!isExistingActive || p.status === 'submitted')) {
+        uniqueParticipantsMap.set(key, { ...existing, ...p });
+      }
+    }
+  });
+  const participants = Array.from(uniqueParticipantsMap.values());
+
   // Daftar kelas unik untuk filter
-  const uniqueClasses = Array.from(new Set(rawParticipants.map(p => p.kelas?.trim()).filter(Boolean)));
+  const uniqueClasses = Array.from(new Set(participants.map(p => p.kelas?.trim()).filter(Boolean)));
 
   // Filter Data Peserta
-  const filteredParticipants = rawParticipants.filter(p => {
+  const filteredParticipants = participants.filter(p => {
     const matchSearch =
       (p.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.username || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -240,10 +260,10 @@ export const LiveMonitorPage = () => {
     return matchSearch && matchKelas && matchStatus;
   });
 
-  const totalRegistered = rawParticipants.length;
-  const countInProgress = rawParticipants.filter(p => p.status === 'in_progress').length;
-  const countSubmitted = rawParticipants.filter(p => p.status === 'submitted').length;
-  const countViolations = rawParticipants.filter(p => Number(p.violations) > 0).length;
+  const totalRegistered = participants.length;
+  const countInProgress = participants.filter(p => p.status === 'in_progress').length;
+  const countSubmitted = participants.filter(p => p.status === 'submitted').length;
+  const countViolations = participants.filter(p => Number(p.violations) > 0).length;
 
   return (
     <AdminLayout title="Live Monitor & Pengawasan Ujian Real-Time">

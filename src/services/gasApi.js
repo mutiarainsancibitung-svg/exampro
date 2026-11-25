@@ -411,9 +411,27 @@ export const gasApi = {
       const proctorData = db.liveProctor || {};
       const nowEpoch = Date.now();
 
-      const participants = (db.participants || []).filter(
+      const rawParticipants = (db.participants || []).filter(
         p => !p.session_id || p.session_id === targetSessionId
       );
+
+      // Deduplikasi peserta unik di mock mode
+      const uniquePartsMap = new Map();
+      rawParticipants.forEach(p => {
+        const key = String(p.username || p.identifier || p.participant_id || '').trim().toLowerCase();
+        if (!key) return;
+        if (!uniquePartsMap.has(key)) {
+          uniquePartsMap.set(key, p);
+        } else {
+          const existing = uniquePartsMap.get(key);
+          const isCurrentActive = p.status === 'submitted' || p.status === 'in_progress';
+          const isExistingActive = existing.status === 'submitted' || existing.status === 'in_progress';
+          if (isCurrentActive && (!isExistingActive || p.status === 'submitted')) {
+            uniquePartsMap.set(key, { ...existing, ...p });
+          }
+        }
+      });
+      const participants = Array.from(uniquePartsMap.values());
 
       const liveList = participants.map(p => {
         const pId = p.participant_id;

@@ -297,6 +297,28 @@ function checkAndRepairDatabase() {
     try { ss.deleteSheet(defaultSheet); } catch (e) {}
   }
 
+  // 6. Deduplikasi peserta ganda di sheet Participants (menjaga agar peserta tetap sesuai jumlah asli / 38)
+  const dedupResult = deduplicateParticipantsInSheet(ss);
+  if (dedupResult && dedupResult.removedCount > 0) {
+    report.push({
+      sheet: SHEETS.PARTICIPANTS,
+      status: 'DEDUPLICATED',
+      action: 'Berhasil membersihkan ' + dedupResult.removedCount + ' baris duplikat peserta.',
+      totalRows: ss.getSheetByName(SHEETS.PARTICIPANTS).getLastRow()
+    });
+  }
+
+  // 7. Hitung ulang submisi yang memiliki nilai 0 akibat mismatch ID sesi sebelumnya
+  const recalcResult = recalculateZeroSubmissions(ss);
+  if (recalcResult && recalcResult.recalculatedCount > 0) {
+    report.push({
+      sheet: SHEETS.SUBMISSIONS,
+      status: 'RECALCULATED',
+      action: 'Berhasil menghitung ulang ' + recalcResult.recalculatedCount + ' skor ujian yang bernilai 0.',
+      totalRows: ss.getSheetByName(SHEETS.SUBMISSIONS).getLastRow()
+    });
+  }
+
   return {
     status: 'success',
     message: 'Pemeriksaan dan perbaikan database Google Sheets selesai.',
@@ -863,19 +885,25 @@ function handleSubmitExam(payload) {
   }
   try { cache.put(cacheKey, JSON.stringify(proctorData), 10800); } catch (e) {}
 
-  const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS, getSpreadsheet())
-    .find(s => String(s.session_id) === String(sessionId));
-  const showScore = sessionData ? (String(sessionData.show_score).toUpperCase() === 'TRUE') : false;
+  const allSessions = getSheetDataAsObjects(SHEETS.SESSIONS, getSpreadsheet());
+  const sessionData = allSessions.find(s => String(s.session_id) === String(sessionId)) || allSessions[0] || {};
+
+  // Sesuai permintaan: Soal PG selalu munculkan skornya secara langsung ke peserta,
+  // kecuali jika panitia secara eksplisit mematikan di pengaturan sesi (show_score === false)
+  const isExplicitlyHidden = sessionData.show_score === false ||
+    String(sessionData.show_score).toLowerCase() === 'false' ||
+    String(sessionData.show_score).toLowerCase() === 'tidak';
+  const showScore = !isExplicitlyHidden;
 
   return {
     status: 'success',
     submissionId: submissionId,
     showScore: showScore,
-    score: showScore ? {
+    score: {
       pgScore: pgScoreCalculated,
       hasEssay: hasEssay,
       totalScore: totalScore
-    } : null,
+    },
     message: 'Ujian berhasil dikirim dan tersimpan dengan aman.'
   };
 }
@@ -1761,6 +1789,134 @@ function handleUpdateExamProgress(payload) {
 }
 
 /**
+ * Deduplikasi Peserta di Sheet Participants
+ * Menggabungkan progres (status, start_time, token_used) ke baris utama dan menghapus baris duplikat
+ */
+function deduplicateParticipantsInSheet(ss) {
+  if (!ss) ss = getSpreadsheet();
+  const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (!partSheet || partSheet.getLastRow() <= 1) return { removedCount: 0 };
+
+  const data = partSheet.getDataRange().getValues();
+  const headers = data[0];
+  const statusColIdx = headers.indexOf('status');
+  const startColIdx = headers.indexOf('start_time');
+  const tokenColIdx = headers.indexOf('token_used');
+
+  const seen = {};
+  const rowsToDelete = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const pId = String(row[0] || '').trim();
+    const user = String(row[2] || '').trim().toLowerCase();
+    const ident = String(row[6] || '').trim().toLowerCase();
+    const status = String(row[statusColIdx] || '').trim().toLowerCase();
+    const key = user || ident || pId;
+
+    if (!key) continue;
+
+    if (!seen[key]) {
+      seen[key] = { rowIndex: i + 1, rowData: row };
+    } else {
+      // Ditemukan baris duplikat
+      const existing = seen[key];
+      const existingStatus = String(existing.rowData[statusColIdx] || '').trim().toLowerCase();
+
+      // Jika baris saat ini lebih maju (submitted / in_progress), pindahkan statusnya ke baris awal
+      if ((status === 'submitted' || status === 'in_progress') && existingStatus !== 'submitted') {
+        if (statusColIdx >= 0) partSheet.getRange(existing.rowIndex, statusColIdx + 1).setValue(row[statusColIdx]);
+        if (startColIdx >= 0 && row[startColIdx]) partSheet.getRange(existing.rowIndex, startColIdx + 1).setValue(row[startColIdx]);
+        if (tokenColIdx >= 0 && row[tokenColIdx]) partSheet.getRange(existing.rowIndex, tokenColIdx + 1).setValue(row[tokenColIdx]);
+        existing.rowData = row;
+      }
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // Hapus baris duplikat dari nomor baris terbesar ke terkecil
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  rowsToDelete.forEach(function(rowIdx) {
+    try { partSheet.deleteRow(rowIdx); } catch (e) {}
+  });
+
+  return { removedCount: rowsToDelete.length };
+}
+
+/**
+ * Hitung Ulang Nilai Submisi yang Bernilai 0 Secara Otomatis
+ * Memeriksa jawaban di sheet Submissions terhadap kunci jawaban Bank Soal
+ */
+function recalculateZeroSubmissions(ss) {
+  if (!ss) ss = getSpreadsheet();
+  const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
+  const qSheet = ss.getSheetByName(SHEETS.QUESTIONS);
+  if (!subSheet || subSheet.getLastRow() <= 1 || !qSheet || qSheet.getLastRow() <= 1) return { recalculatedCount: 0 };
+
+  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss);
+  const subData = subSheet.getDataRange().getValues();
+  const headers = subData[0];
+  const pgCol = headers.indexOf('pg_score');
+  const totalCol = headers.indexOf('total_score');
+  const ansCol = headers.indexOf('answers_json');
+
+  if (pgCol === -1 || totalCol === -1 || ansCol === -1) return { recalculatedCount: 0 };
+
+  let recalculatedCount = 0;
+
+  for (let i = 1; i < subData.length; i++) {
+    const row = subData[i];
+    const currentPg = Number(row[pgCol]) || 0;
+    const currentTotal = Number(row[totalCol]) || 0;
+    const ansRaw = row[ansCol];
+
+    // Jika skor 0 tapi ada lembar jawaban yang diisi, hitung ulang
+    if (currentPg === 0 && currentTotal === 0 && ansRaw) {
+      let parsedAnswers = {};
+      try {
+        parsedAnswers = typeof ansRaw === 'string' ? JSON.parse(ansRaw) : ansRaw;
+      } catch (e) {}
+
+      const ansKeys = Object.keys(parsedAnswers);
+      if (ansKeys.length > 0) {
+        let earned = 0;
+        let maxPg = 0;
+
+        ansKeys.forEach(function(qId) {
+          const q = allQuestions.find(function(item) { return String(item.question_id) === String(qId); });
+          if (q && (q.type === 'single_choice' || q.type === 'multiple_choice')) {
+            const w = Number(q.weight) || 1;
+            maxPg += w;
+            const userAns = parsedAnswers[qId];
+
+            if (q.type === 'single_choice') {
+              if (userAns && String(userAns).trim().toUpperCase() === String(q.key_answer).trim().toUpperCase()) {
+                earned += w;
+              }
+            } else if (q.type === 'multiple_choice') {
+              const uArr = Array.isArray(userAns)
+                ? userAns.map(function(a) { return String(a).trim().toUpperCase(); }).sort().join(',')
+                : String(userAns || '').split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+              const kArr = String(q.key_answer).split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+              if (uArr === kArr && uArr.length > 0) earned += w;
+            }
+          }
+        });
+
+        if (maxPg > 0) {
+          const newScore = Math.round((earned / maxPg) * 100);
+          subSheet.getRange(i + 1, pgCol + 1).setValue(newScore);
+          subSheet.getRange(i + 1, totalCol + 1).setValue(newScore);
+          recalculatedCount++;
+        }
+      }
+    }
+  }
+
+  return { recalculatedCount: recalculatedCount };
+}
+
+/**
  * Ambil Data Pengawasan Real-Time (Live Proctoring Data)
  * Menggabungkan data dari CacheService (RAM real-time) dan data spreadsheet (Peserta & Submissions)
  */
@@ -1771,9 +1927,15 @@ function handleGetLiveProctor(payload) {
   }
 
   const ss = getSpreadsheet();
+
+  // Deduplikasi sheet dan perbaikan otomatis skor jika ada
+  try { deduplicateParticipantsInSheet(ss); } catch (e) {}
+  try { recalculateZeroSubmissions(ss); } catch (e) {}
+
   const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss);
   const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
   const sessions = getSheetDataAsObjects(SHEETS.SESSIONS, ss);
+  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss);
 
   const activeSession = sessions.find(s => !sessionId || String(s.session_id) === String(sessionId)) || sessions[0];
   const targetSessionId = activeSession ? activeSession.session_id : (sessionId || 'SES-001');
@@ -1788,7 +1950,26 @@ function handleGetLiveProctor(payload) {
   }
 
   // Filter peserta untuk sesi ini
-  const targetParts = participants.filter(p => !p.session_id || String(p.session_id) === String(targetSessionId));
+  const rawTargetParts = participants.filter(p => !p.session_id || String(p.session_id) === String(targetSessionId));
+
+  // Deduplikasi peserta unik berdasarkan username / identifier / ID agar total tetap sesuai jumlah asli (38)
+  const uniquePartsMap = {};
+  rawTargetParts.forEach(function(p) {
+    const key = String(p.username || p.identifier || p.participant_id || '').trim().toLowerCase();
+    if (!key) return;
+    if (!uniquePartsMap[key]) {
+      uniquePartsMap[key] = p;
+    } else {
+      const existing = uniquePartsMap[key];
+      const pStatus = String(p.status || '').toLowerCase();
+      const existStatus = String(existing.status || '').toLowerCase();
+      if (pStatus === 'submitted' || (pStatus === 'in_progress' && existStatus !== 'submitted')) {
+        uniquePartsMap[key] = Object.assign({}, existing, p);
+      }
+    }
+  });
+  const targetParts = Object.values(uniquePartsMap);
+
   const targetSubs = submissions.filter(s => String(s.session_id) === String(targetSessionId));
   const subMap = {};
   targetSubs.forEach(function(s) {
@@ -1821,6 +2002,36 @@ function handleGetLiveProctor(payload) {
       }
     }
 
+    let calculatedScore = null;
+    if (sub) {
+      calculatedScore = Number(sub.total_score) || Number(sub.pg_score) || 0;
+      // Jika skor submission masih 0 tapi ada lembar jawaban, hitung skor dinamis secara instan
+      if (calculatedScore === 0 && sub.answers_json) {
+        let pAns = {};
+        try { pAns = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : sub.answers_json; } catch(e) {}
+        const pKeys = Object.keys(pAns);
+        if (pKeys.length > 0 && allQuestions && allQuestions.length > 0) {
+          let earned = 0, maxScore = 0;
+          pKeys.forEach(function(qid) {
+            const q = allQuestions.find(function(item) { return String(item.question_id) === String(qid); });
+            if (q && (q.type === 'single_choice' || q.type === 'multiple_choice')) {
+              const w = Number(q.weight) || 1;
+              maxScore += w;
+              const uAns = pAns[qid];
+              if (q.type === 'single_choice') {
+                if (uAns && String(uAns).trim().toUpperCase() === String(q.key_answer).trim().toUpperCase()) earned += w;
+              } else if (q.type === 'multiple_choice') {
+                const uA = Array.isArray(uAns) ? uAns.map(function(a) { return String(a).trim().toUpperCase(); }).sort().join(',') : String(uAns || '').split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+                const kA = String(q.key_answer).split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+                if (uA === kA && uA.length > 0) earned += w;
+              }
+            }
+          });
+          if (maxScore > 0) calculatedScore = Math.round((earned / maxScore) * 100);
+        }
+      }
+    }
+
     return {
       participant_id: pId,
       session_id: targetSessionId,
@@ -1838,7 +2049,7 @@ function handleGetLiveProctor(payload) {
       violations: Number(sub ? sub.tab_switch_count : (live.violations || 0)),
       last_violation_msg: live.lastViolationMsg || '',
       last_heartbeat: live.lastHeartbeat || null,
-      score: sub ? (Number(sub.total_score) || Number(sub.pg_score) || 0) : null
+      score: calculatedScore
     };
   });
 
