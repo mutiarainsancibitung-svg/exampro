@@ -244,7 +244,8 @@ export const ParticipantsPage = () => {
 
     setIsDeletingAll(true);
     try {
-      const res = await gasApi.deleteAllParticipants(adminSecretKey);
+      const allIds = participants.map(p => p.participant_id).filter(Boolean);
+      const res = await gasApi.deleteAllParticipants(adminSecretKey, allIds);
       setShowDeleteAllModal(false);
       setDeleteAllInput('');
       setSelectedParticipantIds([]);

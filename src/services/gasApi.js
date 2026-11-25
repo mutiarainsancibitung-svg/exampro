@@ -1035,6 +1035,7 @@ export const gasApi = {
 
   /**
    * Hapus Banyak Data Peserta Sekaligus Berdasarkan Pilihan Ceklis (Admin)
+   * Dilengkapi Automatic Fallback ke deleteParticipant tunggal jika backend GAS belum di-deploy ke versi terbaru.
    */
   async batchDeleteParticipants(secretKey, participantIds) {
     if (!participantIds || participantIds.length === 0) {
@@ -1052,18 +1053,65 @@ export const gasApi = {
       return { status: 'success', message: `Berhasil menghapus ${deletedCount} peserta terpilih (mode lokal)`, deletedCount };
     }
 
-    const response = await fetch(getGasApiUrl(), {
-      method: 'POST',
-      body: JSON.stringify({ action: 'batchDeleteParticipants', secretKey, participantIds })
-    });
+    try {
+      const response = await fetch(getGasApiUrl(), {
+        method: 'POST',
+        body: JSON.stringify({ action: 'batchDeleteParticipants', secretKey, participantIds })
+      });
+      const data = await response.json();
+
+      if (data && data.status === 'success') {
+        this.clearDashboardCache();
+        return data;
+      }
+
+      // Jika GAS belum di-deploy ke versi baru (Invalid POST action), aktifkan fallback cerdas
+      if (data && data.status === 'error' && String(data.message).includes('Invalid POST action')) {
+        console.warn('Backend GAS belum di-deploy ke versi terbaru. Menjalankan fallback hapus paralel...');
+        return await this._fallbackDeleteParticipants(secretKey, participantIds);
+      }
+
+      throw new Error(data.message || 'Gagal menghapus batch peserta');
+    } catch (err) {
+      if (String(err.message).includes('Invalid POST action')) {
+        return await this._fallbackDeleteParticipants(secretKey, participantIds);
+      }
+      throw err;
+    }
+  },
+
+  /**
+   * Helper Fallback: Hapus peserta secara paralel / batch menggunakan deleteParticipant tunggal
+   */
+  async _fallbackDeleteParticipants(secretKey, participantIds) {
+    let successCount = 0;
+    const chunkSize = 5; // 5 request paralel per batch
+    for (let i = 0; i < participantIds.length; i += chunkSize) {
+      const chunk = participantIds.slice(i, i + chunkSize);
+      await Promise.all(
+        chunk.map(async (id) => {
+          try {
+            await this.deleteParticipant(secretKey, id);
+            successCount++;
+          } catch (e) {
+            console.error('Fallback delete gagal untuk:', id, e);
+          }
+        })
+      );
+    }
     this.clearDashboardCache();
-    return await response.json();
+    return {
+      status: 'success',
+      message: `Berhasil menghapus ${successCount} peserta terpilih.`,
+      deletedCount: successCount
+    };
   },
 
   /**
    * Hapus Seluruh Data Peserta Sekaligus (Admin)
+   * Mendukung parameter allParticipantIds untuk fallback otomatis jika backend GAS belum versi baru.
    */
-  async deleteAllParticipants(secretKey) {
+  async deleteAllParticipants(secretKey, allParticipantIds = []) {
     if (!this.isConfigured()) {
       const db = getMockDb();
       const deletedCount = db.participants.length;
@@ -1073,12 +1121,31 @@ export const gasApi = {
       return { status: 'success', message: `Berhasil menghapus seluruh data peserta (${deletedCount} orang, mode lokal)` };
     }
 
-    const response = await fetch(getGasApiUrl(), {
-      method: 'POST',
-      body: JSON.stringify({ action: 'deleteAllParticipants', secretKey })
-    });
-    this.clearDashboardCache();
-    return await response.json();
+    try {
+      const response = await fetch(getGasApiUrl(), {
+        method: 'POST',
+        body: JSON.stringify({ action: 'deleteAllParticipants', secretKey })
+      });
+      const data = await response.json();
+
+      if (data && data.status === 'success') {
+        this.clearDashboardCache();
+        return data;
+      }
+
+      // Jika GAS belum di-deploy ke versi baru dan ada daftar ID peserta, jalankan fallback
+      if (data && data.status === 'error' && String(data.message).includes('Invalid POST action') && allParticipantIds.length > 0) {
+        console.warn('Backend GAS belum di-deploy ke versi terbaru. Menjalankan fallback hapus seluruh peserta...');
+        return await this._fallbackDeleteParticipants(secretKey, allParticipantIds);
+      }
+
+      throw new Error(data.message || 'Gagal menghapus seluruh data peserta');
+    } catch (err) {
+      if (String(err.message).includes('Invalid POST action') && allParticipantIds.length > 0) {
+        return await this._fallbackDeleteParticipants(secretKey, allParticipantIds);
+      }
+      throw err;
+    }
   },
 
   /**
