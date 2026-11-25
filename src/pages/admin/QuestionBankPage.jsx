@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { downloadExcelTemplate, parseUploadedQuestionsFile, exportQuestionsToExcel } from '../../utils/excelTemplate';
-import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers, CheckCircle2, Loader2, Database, Sparkles, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Upload, FileSpreadsheet, Download, Check, AlertCircle, Layers, CheckCircle2, Loader2, Database, Sparkles, AlertTriangle, RotateCw } from 'lucide-react';
 
 export const QuestionBankPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -76,10 +76,10 @@ export const QuestionBankPage = () => {
     loadData();
   }, [isAdminLoggedIn, navigate]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await gasApi.getAdminDashboard(adminSecretKey);
+      const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
         setQuestions(res.questions || []);
       }
@@ -462,6 +462,18 @@ export const QuestionBankPage = () => {
 
           {/* Tombol Aksi Excel & Tambah Soal */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Tombol Segarkan */}
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={() => loadData(true)}
+              title="Segarkan data soal dari Google Sheets"
+              className="border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              Segarkan
+            </Button>
+
             {/* Tombol Download Template Excel */}
             <Button
               variant="secondary"

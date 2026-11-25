@@ -202,12 +202,25 @@ export const parseUploadedQuestionsFile = async (file) => {
     const row = rows[i];
     if (!row || row.length === 0) continue;
 
-    const paket = (idxPaket !== -1 ? String(row[idxPaket] || '') : String(row[1] || '')).trim() || 'Pretest';
-    const typeRaw = (idxType !== -1 ? String(row[idxType] || '') : String(row[2] || '')).trim().toLowerCase();
+    const paket = (idxPaket !== -1 ? String(row[idxPaket] || '') : (idxText !== 1 ? String(row[1] || '') : 'Pretest')).trim() || 'Pretest';
+    const typeRaw = (idxType !== -1 ? String(row[idxType] || '') : (idxText !== 2 ? String(row[2] || '') : 'single_choice')).trim().toLowerCase();
     
     // Pastikan teks soal diambil dari kolom teks_soal (biasanya index 3), bukan dari kolom jenis_soal
     const targetIdxText = idxText !== -1 ? idxText : 3;
-    const qText = String(row[targetIdxText] || '').trim();
+    let qText = String(row[targetIdxText] || '').trim();
+
+    // Pencegahan cerdas: Jika qText tidak sengaja bernilai 'single_choice', 'multiple_choice', atau kosong,
+    // pindai kolom lain pada baris ini yang memuat narasi kalimat pertanyaan sesungguhnya
+    if (!qText || qText === 'single_choice' || qText === 'multiple_choice' || qText === 'essay') {
+      for (let c = 1; c < Math.min(row.length, 6); c++) {
+        const candidate = String(row[c] || '').trim();
+        if (c !== idxType && c !== idxPaket && candidate.length > 5 &&
+            candidate !== 'single_choice' && candidate !== 'multiple_choice' && candidate !== 'essay') {
+          qText = candidate;
+          break;
+        }
+      }
+    }
 
     if (!qText) continue;
 

@@ -30,7 +30,8 @@ import {
   Check,
   AlertCircle,
   Trash2,
-  Download
+  Download,
+  RotateCw
 } from 'lucide-react';
 
 export const ExamSetupPage = () => {
@@ -91,10 +92,10 @@ export const ExamSetupPage = () => {
     loadData();
   }, [isAdminLoggedIn, navigate]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await gasApi.getAdminDashboard(adminSecretKey);
+      const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
         const sessList = res.sessions || [];
         const qList = res.questions || [];
@@ -496,27 +497,40 @@ export const ExamSetupPage = () => {
             </button>
           </div>
 
-          <Button
-            variant="primary"
-            size="sm"
-            icon={Plus}
-            onClick={() => {
-              setEditingSession(null);
-              setSessionForm({
-                title: '',
-                type: 'pretest',
-                token: '',
-                duration_minutes: 60,
-                is_active: true,
-                shuffle_questions: true,
-                shuffle_options: true,
-                show_score: true
-              });
-              setShowSessionModal(true);
-            }}
-          >
-            Tambah Mata Ujian Baru
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={() => loadData(true)}
+              title="Segarkan data dari Google Sheets"
+              className="border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              Segarkan
+            </Button>
+
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Plus}
+              onClick={() => {
+                setEditingSession(null);
+                setSessionForm({
+                  title: '',
+                  type: 'pretest',
+                  token: '',
+                  duration_minutes: 60,
+                  is_active: true,
+                  shuffle_questions: true,
+                  shuffle_options: true,
+                  show_score: true
+                });
+                setShowSessionModal(true);
+              }}
+            >
+              Tambah Mata Ujian Baru
+            </Button>
+          </div>
         </div>
 
         {/* TAB 1: WORKFLOW ATUR UJIAN & PEMETAAN KELAS */}

@@ -7,7 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { Award, AlertTriangle, Eye, Check } from 'lucide-react';
+import { Award, AlertTriangle, Eye, Check, RotateCw } from 'lucide-react';
 
 export const ResultsPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -30,10 +30,10 @@ export const ResultsPage = () => {
     loadData();
   }, [isAdminLoggedIn, navigate]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await gasApi.getAdminDashboard(adminSecretKey);
+      const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
         setSubmissions(res.submissions || []);
         setParticipants(res.participants || []);
@@ -113,9 +113,21 @@ export const ResultsPage = () => {
             </select>
           </div>
 
-          <span className="text-xs text-kemenag-800 font-bold bg-kemenag-50 px-3 py-1.5 rounded-2xl border border-kemenag-200">
-            Total Submisi: {filtered.length} peserta
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-kemenag-800 font-bold bg-kemenag-50 px-3 py-1.5 rounded-2xl border border-kemenag-200">
+              Total Submisi: {filtered.length} peserta
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={() => loadData(true)}
+              title="Segarkan data hasil ujian dari Google Sheets"
+              className="border-slate-200 text-slate-700 hover:bg-slate-50 text-xs py-1 px-3"
+            >
+              Segarkan
+            </Button>
+          </div>
         </div>
 
         {/* Tabel Rekap Nilai */}

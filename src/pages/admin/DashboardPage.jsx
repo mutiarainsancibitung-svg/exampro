@@ -7,7 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database } from 'lucide-react';
+import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database, RotateCw } from 'lucide-react';
 
 export const DashboardPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -38,10 +38,10 @@ export const DashboardPage = () => {
     loadDashboard();
   }, [isAdminLoggedIn, navigate]);
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await gasApi.getAdminDashboard(adminSecretKey);
+      const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
         setData(res);
       }
@@ -149,6 +149,16 @@ export const DashboardPage = () => {
               <p className="text-xs text-slate-500">Kelola token masuk, durasi pengerjaan, dan status ujian.</p>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={RotateCw}
+                onClick={() => loadDashboard(true)}
+                className="border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="Segarkan data dari Google Sheets (bypass cache)"
+              >
+                Segarkan
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

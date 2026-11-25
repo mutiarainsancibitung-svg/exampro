@@ -5,6 +5,11 @@
 
 import { validateRotatingToken } from '../utils/rotatingToken';
 
+// Cache Client Dashboard In-Memory & Session Storage (Tahap 3 - SWR Acceleration)
+let adminDashboardCache = null;
+let adminDashboardCacheTime = 0;
+const DASHBOARD_CACHE_MAX_AGE = 60 * 1000; // 60 detik umur cache segar di browser
+
 const getGasApiUrl = () => {
   if (typeof window !== 'undefined') {
     const custom = localStorage.getItem('exampro_gas_api_url');
@@ -236,10 +241,22 @@ export const gasApi = {
         matched = db.questions; // Fallback jika belum ada soal di paket tersebut
       }
 
-      const questions = matched.map(q => {
+      let questions = matched.map(q => {
         const { key_answer, ...safeQ } = q;
-        return safeQ;
+        let opts = safeQ.options ? [...safeQ.options] : [];
+        if (sess?.shuffle_options && opts.length > 0 && safeQ.type !== 'essay') {
+          // Acak posisi opsi jawaban (opt.id tetap dipertahankan)
+          opts = [...opts].sort(() => Math.random() - 0.5);
+        }
+        return {
+          ...safeQ,
+          options: opts
+        };
       });
+
+      if (sess?.shuffle_questions) {
+        questions = [...questions].sort(() => Math.random() - 0.5);
+      }
 
       return { status: 'success', session: sess, questions, paket: targetPaket };
     }
@@ -322,6 +339,7 @@ export const gasApi = {
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal mengirim jawaban ujian');
+    this.clearDashboardCache();
     return data;
   },
 
@@ -553,13 +571,52 @@ export const gasApi = {
   },
 
   /**
-   * Ambil Data Admin Dashboard
+   * Bersihkan Cache Dashboard Browser (Tahap 3)
+   * Dipanggil otomatis setiap kali ada data yang disimpan, diedit, atau dihapus.
    */
-  async getAdminDashboard(secretKey) {
+  clearDashboardCache() {
+    adminDashboardCache = null;
+    adminDashboardCacheTime = 0;
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.removeItem('exampro_admin_dashboard_cache');
+        sessionStorage.removeItem('exampro_admin_dashboard_cache_time');
+      }
+    } catch (e) {}
+  },
+
+  /**
+   * Ambil Data Admin Dashboard dengan Caching Cerdas Client-Side (Tahap 3 SWR)
+   * Navigasi antar-halaman admin menjadi instan (0 ms) tanpa menunggu loading spinner.
+   * @param {string} secretKey
+   * @param {boolean} forceRefresh - jika true, paksa ambil data baru dari cloud Google Apps Script
+   */
+  async getAdminDashboard(secretKey, forceRefresh = false) {
+    const now = Date.now();
+
+    // 1. Cek memory cache & sessionStorage jika tidak dipaksa refresh (Instan 0 ms!)
+    if (!forceRefresh) {
+      if (adminDashboardCache && (now - adminDashboardCacheTime < DASHBOARD_CACHE_MAX_AGE)) {
+        return adminDashboardCache;
+      }
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          const storedStr = sessionStorage.getItem('exampro_admin_dashboard_cache');
+          const storedTime = Number(sessionStorage.getItem('exampro_admin_dashboard_cache_time') || 0);
+          if (storedStr && (now - storedTime < DASHBOARD_CACHE_MAX_AGE)) {
+            const parsed = JSON.parse(storedStr);
+            adminDashboardCache = parsed;
+            adminDashboardCacheTime = storedTime;
+            return parsed;
+          }
+        }
+      } catch (e) {}
+    }
+
     if (!this.isConfigured()) {
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 200));
       const db = getMockDb();
-      return {
+      const res = {
         status: 'success',
         sessions: db.sessions,
         questions: db.questions,
@@ -567,11 +624,25 @@ export const gasApi = {
         submissions: db.submissions,
         admins: db.admins || []
       };
+      adminDashboardCache = res;
+      adminDashboardCacheTime = Date.now();
+      return res;
     }
 
     const response = await fetch(`${getGasApiUrl()}?action=getAdminDashboard&secretKey=${encodeURIComponent(secretKey)}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat dashboard');
+
+    // Simpan ke memory dan sessionStorage
+    adminDashboardCache = data;
+    adminDashboardCacheTime = Date.now();
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.setItem('exampro_admin_dashboard_cache', JSON.stringify(data));
+        sessionStorage.setItem('exampro_admin_dashboard_cache_time', String(adminDashboardCacheTime));
+      }
+    } catch (e) {}
+
     return data;
   },
 
@@ -589,6 +660,7 @@ export const gasApi = {
         db.sessions.push(session);
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', sessionId: session.session_id };
     }
 
@@ -598,6 +670,7 @@ export const gasApi = {
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal menyimpan sesi');
+    this.clearDashboardCache();
     return data;
   },
 
@@ -617,6 +690,7 @@ export const gasApi = {
         related.forEach(sub => db.archivedSubmissions.push({ ...sub, archived_at: new Date().toISOString() }));
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', message: 'Sesi berhasil dihapus (mode lokal)' };
     }
 
@@ -626,6 +700,7 @@ export const gasApi = {
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal menghapus sesi ujian');
+    this.clearDashboardCache();
     return data;
   },
 
@@ -674,6 +749,7 @@ export const gasApi = {
         });
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', message: 'Backup berhasil dipulihkan (mode lokal)' };
     }
 
@@ -683,6 +759,7 @@ export const gasApi = {
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memulihkan data backup');
+    this.clearDashboardCache();
     return data;
   },
 
@@ -705,6 +782,7 @@ export const gasApi = {
         db.questions.push(preparedQuestion);
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', questionId: preparedQuestion.question_id };
     }
 
@@ -716,6 +794,7 @@ export const gasApi = {
     if (data.status !== 'success') {
       throw new Error(data.message || 'Gagal menyimpan butir soal ke database Google Sheets.');
     }
+    this.clearDashboardCache();
     return data;
   },
 
@@ -740,6 +819,7 @@ export const gasApi = {
         }
       });
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', message: `Berhasil menyimpan ${prepared.length} butir soal.` };
     }
 
@@ -751,6 +831,7 @@ export const gasApi = {
     if (data.status !== 'success') {
       throw new Error(data.message || 'Gagal menyimpan batch soal ke Google Sheets.');
     }
+    this.clearDashboardCache();
     return data;
   },
 
@@ -762,6 +843,7 @@ export const gasApi = {
       const db = getMockDb();
       db.questions = db.questions.filter(q => q.question_id !== questionId);
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success' };
     }
 
@@ -769,6 +851,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteQuestion', secretKey, questionId })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -791,6 +874,7 @@ export const gasApi = {
       });
       const deletedCount = initialCount - db.questions.length;
       saveMockDb(db);
+      this.clearDashboardCache();
       return {
         status: 'success',
         deletedCount,
@@ -806,6 +890,7 @@ export const gasApi = {
     if (data.status !== 'success') {
       throw new Error(data.message || 'Gagal menghapus soal per paket.');
     }
+    this.clearDashboardCache();
     return data;
   },
 
@@ -821,6 +906,7 @@ export const gasApi = {
         sub.total_score = Math.round((sub.pg_score + sub.essay_score) / 2);
         saveMockDb(db);
       }
+      this.clearDashboardCache();
       return { status: 'success', totalScore: sub?.total_score };
     }
 
@@ -828,6 +914,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'gradeEssay', secretKey, submissionId, essayScore })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -878,6 +965,7 @@ export const gasApi = {
         db.participants.push(participant);
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', participantId: participant.participant_id };
     }
 
@@ -885,6 +973,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'saveParticipant', secretKey, participant })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -910,6 +999,7 @@ export const gasApi = {
         });
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', message: `Berhasil menambahkan ${participants.length} peserta` };
     }
 
@@ -917,6 +1007,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'batchSaveParticipants', secretKey, participants })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -928,6 +1019,7 @@ export const gasApi = {
       const db = getMockDb();
       db.participants = db.participants.filter(p => p.participant_id !== participantId);
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success' };
     }
 
@@ -935,6 +1027,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteParticipant', secretKey, participantId })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -968,6 +1061,7 @@ export const gasApi = {
         db.admins.push(adminData);
       }
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', adminId: adminData.admin_id, message: 'Data admin berhasil disimpan.' };
     }
 
@@ -975,6 +1069,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'saveAdminUser', secretKey, adminData })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 
@@ -986,6 +1081,7 @@ export const gasApi = {
       const db = getMockDb();
       db.admins = (db.admins || []).filter(a => a.admin_id !== adminId);
       saveMockDb(db);
+      this.clearDashboardCache();
       return { status: 'success', message: 'Admin berhasil dihapus.' };
     }
 
@@ -993,6 +1089,7 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteAdminUser', secretKey, adminId })
     });
+    this.clearDashboardCache();
     return await response.json();
   },
 

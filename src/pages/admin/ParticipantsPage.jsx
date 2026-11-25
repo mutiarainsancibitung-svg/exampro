@@ -27,7 +27,8 @@ import {
   Layers,
   GraduationCap,
   Sparkles,
-  PlusCircle
+  PlusCircle,
+  RotateCw
 } from 'lucide-react';
 
 export const ParticipantsPage = () => {
@@ -71,10 +72,10 @@ export const ParticipantsPage = () => {
     loadData();
   }, [isAdminLoggedIn, navigate]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await gasApi.getAdminDashboard(adminSecretKey);
+      const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
         const parts = res.participants || [];
         const qList = res.questions || [];
@@ -296,6 +297,18 @@ export const ParticipantsPage = () => {
 
           {/* Tombol Aksi Excel & Tambah Peserta */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Tombol Segarkan */}
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={() => loadData(true)}
+              title="Segarkan data peserta dari Google Sheets"
+              className="border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              Segarkan
+            </Button>
+
             {/* Download Template Excel Peserta */}
             <Button
               variant="secondary"
