@@ -96,7 +96,7 @@ export const TokenLoginPage = () => {
 
       if (res.status === 'success' && res.participant) {
         const p = res.participant;
-        setConfirmFullName(p.full_name || username.toUpperCase() + ' - PESERTA PAI');
+        setConfirmFullName(p.full_name || username);
         setGender(p.gender || 'Laki-Laki');
         setUserKelas(p.kelas || 'Kelas A');
         setUserPaket(p.paket || 'Pretest');
@@ -329,7 +329,7 @@ export const TokenLoginPage = () => {
                   {/* Readonly: Nama Peserta Status */}
                   <div className="border-b border-slate-100 pb-2">
                     <label className="block text-[11px] font-semibold text-slate-500 uppercase">Nama Peserta</label>
-                    <span className="text-sm font-semibold text-slate-800">{username} - PESERTA PAI</span>
+                    <span className="text-sm font-semibold text-slate-800">{confirmFullName || username}</span>
                   </div>
 
                   {/* Jenis Kelamin */}
