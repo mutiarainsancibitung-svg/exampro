@@ -674,27 +674,83 @@ function handleStartExam(payload) {
   const ss = getSpreadsheet();
   const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
 
-  const participantId = 'P-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000);
-  const startTime = new Date().toISOString();
+  const cleanIdentifier = String(identifier).trim();
+  const now = new Date().toISOString();
 
-  partSheet.appendRow([
-    participantId,
-    session.session_id,
-    identifier.trim(),
-    'kemenag2026',
-    fullName.trim(),
-    gender || 'Laki-Laki',
-    identifier.trim(),
-    payload.institution || '',
-    token.trim().toUpperCase(),
-    startTime,
-    'in_progress'
-  ]);
+  let existingRow = -1;
+  let participantId = null;
+
+  // Cari apakah peserta sudah terdaftar di sheet peserta berdasarkan username / identifier
+  if (partSheet && partSheet.getLastRow() > 1) {
+    const data = partSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const rowPId = String(data[i][0]).trim();
+      const rowUsername = String(data[i][2]).trim().toLowerCase();
+      const rowIdent = String(data[i][6]).trim().toLowerCase();
+
+      if (rowUsername === cleanIdentifier.toLowerCase() || rowIdent === cleanIdentifier.toLowerCase() || rowPId === cleanIdentifier) {
+        existingRow = i + 1;
+        participantId = rowPId;
+        break;
+      }
+    }
+  }
+
+  if (existingRow > 0) {
+    // Update baris peserta yang sudah ada (status: in_progress, start_time, token_used, session_id)
+    const statusCol = HEADERS.Participants.indexOf('status') + 1;
+    const startCol = HEADERS.Participants.indexOf('start_time') + 1;
+    const tokenCol = HEADERS.Participants.indexOf('token_used') + 1;
+    const sessCol = HEADERS.Participants.indexOf('session_id') + 1;
+
+    if (statusCol > 0) partSheet.getRange(existingRow, statusCol).setValue('in_progress');
+    if (startCol > 0) partSheet.getRange(existingRow, startCol).setValue(now);
+    if (tokenCol > 0) partSheet.getRange(existingRow, tokenCol).setValue(token.trim().toUpperCase());
+    if (sessCol > 0) partSheet.getRange(existingRow, sessCol).setValue(session.session_id);
+  } else {
+    // Jika peserta baru (walk-in), buat baris lengkap 13 kolom
+    participantId = 'P-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000);
+    partSheet.appendRow([
+      participantId,
+      session.session_id,
+      cleanIdentifier,
+      'kemenag2026',
+      fullName.trim(),
+      gender || '-',
+      cleanIdentifier,
+      payload.kelas || 'Kelas A',
+      payload.institution || '',
+      payload.paket || session.type || 'Pretest',
+      token.trim().toUpperCase(),
+      now,
+      'in_progress'
+    ]);
+  }
+
+  // Update Cache Live Proctor agar peserta langsung muncul di Live Monitor
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + session.session_id;
+  let proctorData = {};
+  const cachedStr = cache.get(cacheKey);
+  if (cachedStr) {
+    try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+  }
+  proctorData[participantId] = {
+    participantId: participantId,
+    sessionId: session.session_id,
+    answeredCount: 0,
+    totalQuestions: 25,
+    violations: 0,
+    lastHeartbeat: now,
+    status: 'in_progress'
+  };
+  proctorData[cleanIdentifier.toLowerCase()] = proctorData[participantId];
+  try { cache.put(cacheKey, JSON.stringify(proctorData), 10800); } catch (e) {}
 
   return {
     status: 'success',
     participantId: participantId,
-    startTime: startTime,
+    startTime: now,
     session: session
   };
 }
@@ -705,29 +761,22 @@ function handleSubmitExam(payload) {
     return { status: 'error', message: 'Data submission tidak lengkap' };
   }
 
-  const cache = CacheService.getScriptCache();
-  const scoringCacheKey = 'scoring_keys_' + sessionId;
-  let questions = null;
-
-  // 1. Ambil master scoring keys dari RAM Cache jika ada (Akselerasi Tahap 2)
-  const cachedKeys = cache.get(scoringCacheKey);
-  if (cachedKeys) {
-    try { questions = JSON.parse(cachedKeys); } catch (e) {}
-  }
-
-  if (!questions || questions.length === 0) {
-    const ss = getSpreadsheet();
-    questions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss)
-      .filter(q => String(q.session_id) === String(sessionId));
-    try {
-      cache.put(scoringCacheKey, JSON.stringify(questions), 1800);
-    } catch (e) {}
-  }
-
-  const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS, getSpreadsheet())
-    .find(s => String(s.session_id) === String(sessionId));
-
+  const ss = getSpreadsheet();
+  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss);
   const userAnswers = answers || {};
+  const answeredKeys = Object.keys(userAnswers);
+
+  // Ambil soal yang relevan: prioritaskan butir soal yang benar-benar dijawab peserta
+  let questions = [];
+  if (answeredKeys.length > 0) {
+    questions = allQuestions.filter(q => answeredKeys.includes(String(q.question_id)));
+  }
+  if (questions.length === 0) {
+    questions = allQuestions.filter(q => String(q.session_id) === String(sessionId));
+  }
+  if (questions.length === 0) {
+    questions = allQuestions;
+  }
 
   let totalPgMaxScore = 0;
   let earnedPgScore = 0;
@@ -744,7 +793,9 @@ function handleSubmitExam(payload) {
       }
     } else if (q.type === 'multiple_choice') {
       totalPgMaxScore += qWeight;
-      const userArr = Array.isArray(userAnswer) ? userAnswer.map(a => String(a).trim().toUpperCase()).sort().join(',') : String(userAnswer || '').trim().toUpperCase();
+      const userArr = Array.isArray(userAnswer)
+        ? userAnswer.map(a => String(a).trim().toUpperCase()).sort().join(',')
+        : String(userAnswer || '').split(',').map(a => a.trim().toUpperCase()).sort().join(',');
       const keyArr = String(q.key_answer).split(',').map(a => a.trim().toUpperCase()).sort().join(',');
       if (userArr === keyArr && userArr.length > 0) {
         earnedPgScore += qWeight;
@@ -761,13 +812,10 @@ function handleSubmitExam(payload) {
   const submissionId = 'SUB-' + new Date().getTime();
   const submittedAt = new Date().toISOString();
 
-  const ss = getSpreadsheet();
   const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
-
-  // 2. Pasang LockService antrean aman agar puluhan peserta mengumpulkan serentak 100% bebas crash
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000); // Tunggu antrean aman maksimal 10 detik
+    lock.waitLock(10000);
 
     subSheet.appendRow([
       submissionId,
@@ -781,14 +829,17 @@ function handleSubmitExam(payload) {
       submittedAt
     ]);
 
+    // Update status peserta di sheet participants
     const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
-    if (partSheet) {
+    if (partSheet && partSheet.getLastRow() > 1) {
       const partRows = partSheet.getDataRange().getValues();
-      const statusCol = HEADERS.Participants.indexOf('status') + 1; // 1-based index
+      const statusCol = HEADERS.Participants.indexOf('status') + 1;
       const colToUpdate = statusCol > 0 ? statusCol : 13;
 
       for (let i = 1; i < partRows.length; i++) {
-        if (String(partRows[i][0]) === String(participantId)) {
+        const rowPId = String(partRows[i][0]).trim();
+        const rowUsername = String(partRows[i][2]).trim().toLowerCase();
+        if (rowPId === String(participantId).trim() || rowUsername === String(participantId).trim().toLowerCase()) {
           partSheet.getRange(i + 1, colToUpdate).setValue('submitted');
           break;
         }
@@ -798,6 +849,22 @@ function handleSubmitExam(payload) {
     lock.releaseLock();
   }
 
+  // Update live proctor cache agar status berubah jadi 'submitted'
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + sessionId;
+  let proctorData = {};
+  const cachedStr = cache.get(cacheKey);
+  if (cachedStr) {
+    try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+  }
+  if (proctorData[participantId]) {
+    proctorData[participantId].status = 'submitted';
+    proctorData[participantId].answeredCount = Object.keys(userAnswers).length;
+  }
+  try { cache.put(cacheKey, JSON.stringify(proctorData), 10800); } catch (e) {}
+
+  const sessionData = getSheetDataAsObjects(SHEETS.SESSIONS, getSpreadsheet())
+    .find(s => String(s.session_id) === String(sessionId));
   const showScore = sessionData ? (String(sessionData.show_score).toUpperCase() === 'TRUE') : false;
 
   return {
@@ -1724,14 +1791,22 @@ function handleGetLiveProctor(payload) {
   const targetParts = participants.filter(p => !p.session_id || String(p.session_id) === String(targetSessionId));
   const targetSubs = submissions.filter(s => String(s.session_id) === String(targetSessionId));
   const subMap = {};
-  targetSubs.forEach(function(s) { subMap[s.participant_id] = s; });
+  targetSubs.forEach(function(s) {
+    if (s.participant_id) subMap[String(s.participant_id).trim()] = s;
+  });
 
   const nowEpoch = new Date().getTime();
 
   const liveList = targetParts.map(function(p) {
-    const pId = p.participant_id;
-    const live = proctorData[pId] || {};
-    const sub = subMap[pId];
+    const pId = String(p.participant_id || '').trim();
+    const pUser = String(p.username || '').trim().toLowerCase();
+    const pIdent = String(p.identifier || '').trim().toLowerCase();
+
+    const live = proctorData[pId] || proctorData[pUser] || {};
+    const sub = subMap[pId] || subMap[pUser] || targetSubs.find(function(s) {
+      const sId = String(s.participant_id || '').trim().toLowerCase();
+      return sId === pId.toLowerCase() || sId === pUser || (pIdent && sId === pIdent);
+    });
 
     const isSubmitted = !!sub || String(p.status).toLowerCase() === 'submitted';
     let status = isSubmitted ? 'submitted' : (p.status || 'registered');

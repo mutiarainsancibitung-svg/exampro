@@ -274,7 +274,14 @@ export const gasApi = {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 1000));
       const db = getMockDb();
-      const questions = db.questions.filter(q => q.session_id === sessionId);
+      let questions = db.questions.filter(q => q.session_id === sessionId);
+      if (questions.length === 0) {
+        const ansKeys = Object.keys(answers || {});
+        if (ansKeys.length > 0) {
+          questions = db.questions.filter(q => ansKeys.includes(q.question_id));
+        }
+        if (questions.length === 0) questions = db.questions;
+      }
       const sess = db.sessions.find(s => s.session_id === sessionId);
 
       let earnedPg = 0;
@@ -315,8 +322,11 @@ export const gasApi = {
         submitted_at: new Date().toISOString()
       });
 
-      const pIndex = db.participants.findIndex(p => p.participant_id === participantId);
+      const pIndex = db.participants.findIndex(p => p.participant_id === participantId || p.username === participantId || p.identifier === participantId);
       if (pIndex !== -1) db.participants[pIndex].status = 'submitted';
+      if (db.liveProctor && db.liveProctor[participantId]) {
+        db.liveProctor[participantId].status = 'submitted';
+      }
 
       saveMockDb(db);
 
@@ -408,7 +418,7 @@ export const gasApi = {
       const liveList = participants.map(p => {
         const pId = p.participant_id;
         const live = proctorData[pId] || {};
-        const sub = (db.submissions || []).find(s => s.participant_id === pId && s.session_id === targetSessionId);
+        const sub = (db.submissions || []).find(s => (s.participant_id === pId || s.participant_id === p.username || s.participant_id === p.identifier) && (!targetSessionId || s.session_id === targetSessionId));
         const isSubmitted = !!sub || p.status === 'submitted';
 
         let status = isSubmitted ? 'submitted' : (p.status || 'registered');

@@ -22,12 +22,8 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
-  Filter,
-  FileSpreadsheet,
-  BookOpen,
-  Calendar,
-  Layers,
-  GraduationCap
+  Printer,
+  FileText
 } from 'lucide-react';
 
 export const ResultsPage = () => {
@@ -132,7 +128,7 @@ export const ResultsPage = () => {
     }
   };
 
-  // Unduh Rekap Lengkap Seluruh Peserta
+  // Unduh Rekap Lengkap Seluruh Peserta (Excel Format Template)
   const handleExportAll = () => {
     if (filteredSubmissions.length === 0) {
       alert('Tidak ada data submisi untuk diunduh.');
@@ -149,10 +145,10 @@ export const ResultsPage = () => {
     );
   };
 
-  // Unduh Lembar Hasil Perorangan Peserta
-  const handleExportSingle = () => {
+  // Unduh Lembar Hasil Perorangan Peserta (.xlsx)
+  const handleExportSingleExcel = () => {
     if (!activeSub) return;
-    const part = participants.find(p => p.participant_id === activeSub.participant_id);
+    const part = participants.find(p => p.participant_id === activeSub.participant_id || p.username === activeSub.participant_id);
     const sess = sessions.find(s => s.session_id === activeSub.session_id);
     const cleanName = (part?.full_name || part?.username || 'Peserta').replace(/[^a-zA-Z0-9_]/g, '_');
     exportSingleParticipantResultToExcel(
@@ -164,6 +160,220 @@ export const ResultsPage = () => {
     );
   };
 
+  // Cetak / Unduh PDF Hasil Ujian Individual Per Peserta
+  const handlePrintPdfIndividual = (subToPrint) => {
+    const sub = subToPrint || activeSub;
+    if (!sub) return;
+
+    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+    const sess = sessions.find(s => s.session_id === sub.session_id);
+
+    let parsedAnswers = {};
+    try {
+      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+    } catch (e) {}
+
+    let sessQuestions = questions.filter(q => q.session_id === sub.session_id);
+    if (sessQuestions.length === 0 && Object.keys(parsedAnswers).length > 0) {
+      sessQuestions = questions.filter(q => Object.keys(parsedAnswers).includes(q.question_id));
+    }
+    if (sessQuestions.length === 0) sessQuestions = questions;
+
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    const questionRowsHtml = sessQuestions.map((q, idx) => {
+      const userAns = parsedAnswers[q.question_id];
+      const evalRes = evaluateQuestion(q, userAns);
+
+      let statusBadge = '';
+      if (evalRes.isEssay) {
+        statusBadge = `<span style="background:#f3e8ff;color:#6b21a8;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">Dinilai Essay (${sub.essay_score || 0}/100)</span>`;
+      } else if (evalRes.isCorrect) {
+        correctCount++;
+        statusBadge = `<span style="background:#dcfce7;color:#166534;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">&#10003; BETUL (BENAR)</span>`;
+      } else if (evalRes.isBlank) {
+        wrongCount++;
+        statusBadge = `<span style="background:#f1f5f9;color:#64748b;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">KOSONG</span>`;
+      } else {
+        wrongCount++;
+        statusBadge = `<span style="background:#fee2e2;color:#991b1b;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">&#10007; SALAH</span>`;
+      }
+
+      const userAnsFormatted = evalRes.isEssay
+        ? `<em>"${evalRes.userText || '(Tidak dijawab)'}"</em>`
+        : `<strong>${evalRes.userText || '(Kosong)'}</strong>`;
+
+      const keyAnsFormatted = evalRes.isEssay
+        ? `<small>Rubrik: ${q.key_answer || '-'}</small>`
+        : `<strong>${evalRes.key || '-'}</strong>`;
+
+      return `
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
+          <td style="padding: 6px 4px; text-align: center; font-weight: bold; vertical-align: top;">${idx + 1}</td>
+          <td style="padding: 6px 8px; vertical-align: top;">
+            <div style="font-weight: 600; color: #1e293b; margin-bottom: 3px;">${q.question_text || ''}</div>
+            <div style="font-size: 10px; color: #64748b;">Tipe: ${q.type === 'single_choice' ? 'Pilihan Ganda' : q.type === 'multiple_choice' ? 'Pilihan Jamak' : 'Essay'} • Bobot: ${q.weight || 1} poin</div>
+          </td>
+          <td style="padding: 6px 8px; text-align: center; vertical-align: top;">${userAnsFormatted}</td>
+          <td style="padding: 6px 8px; text-align: center; vertical-align: top; color: #047857;">${keyAnsFormatted}</td>
+          <td style="padding: 6px 8px; text-align: center; vertical-align: top;">${statusBadge}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Pop-up terblokir oleh browser. Harap izinkan pop-up untuk mencetak dokumen hasil ujian.');
+      return;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Hasil Ujian - ${part?.full_name || part?.username || 'Peserta'}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; margin: 0; padding: 15px; line-height: 1.4; }
+          .kop-table { width: 100%; border-collapse: collapse; border-bottom: 3px double #0d7a5f; padding-bottom: 8px; margin-bottom: 12px; }
+          .kop-logo { width: 60px; height: 60px; object-fit: contain; }
+          .kop-text { text-align: center; }
+          .kop-text h2 { margin: 0; font-size: 14px; text-transform: uppercase; color: #0f172a; letter-spacing: 0.5px; }
+          .kop-text h1 { margin: 2px 0; font-size: 16px; text-transform: uppercase; color: #0d7a5f; }
+          .kop-text p { margin: 0; font-size: 11px; color: #475569; }
+          .doc-title { text-align: center; font-size: 13px; font-weight: bold; text-decoration: underline; margin: 12px 0 8px; text-transform: uppercase; }
+          .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+          .info-grid td { padding: 3px 6px; }
+          .card-summary { display: flex; gap: 8px; margin-bottom: 12px; text-align: center; }
+          .metric-box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px; background: #f8fafc; }
+          .metric-box .label { font-size: 9px; text-transform: uppercase; font-weight: bold; color: #64748b; }
+          .metric-box .val { font-size: 16px; font-weight: 900; color: #0f172a; margin-top: 1px; }
+          .data-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          .data-table th { background: #f1f5f9; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; padding: 6px 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; }
+          .footer-sign { width: 100%; margin-top: 25px; font-size: 11px; }
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <table class="kop-table">
+          <tr>
+            <td style="width: 70px; text-align: center;"><img src="${window.location.origin}/Logo_Kemenag.png" class="kop-logo" onerror="this.style.display='none'" /></td>
+            <td class="kop-text">
+              <h2>Kementerian Agama Republik Indonesia</h2>
+              <h1>Fakultas Ilmu Tarbiyah dan Keguruan UIN Jakarta</h1>
+              <p>Program Pelatihan & Asesmen Guru PAI Modern Berbasis CBT Online</p>
+            </td>
+            <td style="width: 70px; text-align: center;"><img src="${window.location.origin}/Logo_UIN.png" class="kop-logo" onerror="this.style.display='none'" /></td>
+          </tr>
+        </table>
+
+        <div class="doc-title">Lembar Hasil Evaluasi Ujian Peserta CBT</div>
+
+        <table class="info-grid">
+          <tr>
+            <td style="width: 18%; font-weight: bold;">Nama Peserta</td>
+            <td style="width: 32%;">: <strong>${part?.full_name || part?.username || 'Peserta PAI'}</strong></td>
+            <td style="width: 18%; font-weight: bold;">Mata Ujian</td>
+            <td style="width: 32%;">: ${sess?.title || sub.session_id}</td>
+          </tr>
+          <tr>
+            <td style="font-weight: bold;">Nomor Peserta / NIP</td>
+            <td>: ${part?.identifier || part?.username || '-'}</td>
+            <td style="font-weight: bold;">Kelas & Paket</td>
+            <td>: ${part?.kelas || '-'} (${part?.paket || '-'})</td>
+          </tr>
+          <tr>
+            <td style="font-weight: bold;">Asal Madrasah/Sekolah</td>
+            <td>: ${part?.institution || '-'}</td>
+            <td style="font-weight: bold;">Waktu Pengumpulan</td>
+            <td>: ${sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID') : '-'}</td>
+          </tr>
+        </table>
+
+        <div style="display: table; width: 100%; margin-bottom: 12px;">
+          <div style="display: table-row;">
+            <div style="display: table-cell; width: 20%; padding: 3px;">
+              <div class="metric-box" style="background:#ecfdf5; border-color:#a7f3d0;">
+                <div class="label" style="color:#065f46;">Nilai Total</div>
+                <div class="val" style="color:#047857;">${sub.total_score}</div>
+              </div>
+            </div>
+            <div style="display: table-cell; width: 20%; padding: 3px;">
+              <div class="metric-box">
+                <div class="label">Skor PG</div>
+                <div class="val" style="color:#0f766e;">${sub.pg_score}</div>
+              </div>
+            </div>
+            <div style="display: table-cell; width: 20%; padding: 3px;">
+              <div class="metric-box">
+                <div class="label">Skor Essay</div>
+                <div class="val" style="color:#7e22ce;">${sub.essay_score || 0}</div>
+              </div>
+            </div>
+            <div style="display: table-cell; width: 20%; padding: 3px;">
+              <div class="metric-box" style="background:#f0fdf4;">
+                <div class="label" style="color:#166534;">Jawaban Benar</div>
+                <div class="val" style="color:#15803d;">${correctCount}</div>
+              </div>
+            </div>
+            <div style="display: table-cell; width: 20%; padding: 3px;">
+              <div class="metric-box" style="background:#fef2f2;">
+                <div class="label" style="color:#991b1b;">Jawaban Salah</div>
+                <div class="val" style="color:#b91c1c;">${wrongCount}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 5%;">No</th>
+              <th style="width: 50%; text-align: left;">Pertanyaan / Butir Soal</th>
+              <th style="width: 15%;">Jawaban Peserta</th>
+              <th style="width: 15%;">Kunci Jawaban</th>
+              <th style="width: 15%;">Status Hasil</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${questionRowsHtml}
+          </tbody>
+        </table>
+
+        <table class="footer-sign">
+          <tr>
+            <td style="width: 60%;"></td>
+            <td style="width: 40%; text-align: center;">
+              <div>Jakarta, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+              <div style="margin-top: 3px; font-weight: bold;">Panitia Ujian & Pengawas CBT,</div>
+              <div style="height: 50px;"></div>
+              <div style="font-weight: bold; text-decoration: underline;">Panitia Pelatihan PAI</div>
+              <div style="font-size: 10px; color: #64748b;">FITK UIN Syarif Hidayatullah Jakarta</div>
+            </td>
+          </tr>
+        </table>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   // Ekstrak Kelas & Paket Dinamis
   const dynamicClasses = Array.from(new Set(participants.map(p => p.kelas?.trim()).filter(Boolean)));
   const dynamicPackages = Array.from(new Set([
@@ -173,7 +383,7 @@ export const ResultsPage = () => {
 
   // Gabungkan info peserta & sesi ke data submisi
   const enrichedSubmissions = submissions.map(sub => {
-    const part = participants.find(p => p.participant_id === sub.participant_id);
+    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
     const sess = sessions.find(s => s.session_id === sub.session_id);
 
     let parsedAnswers = {};
@@ -183,7 +393,14 @@ export const ResultsPage = () => {
         : (sub.answers_json || {});
     } catch (e) {}
 
-    const sessQuestions = questions.filter(q => q.session_id === sub.session_id && q.type !== 'essay');
+    let sessQuestions = questions.filter(q => q.session_id === sub.session_id && q.type !== 'essay');
+    if (sessQuestions.length === 0 && Object.keys(parsedAnswers).length > 0) {
+      sessQuestions = questions.filter(q => Object.keys(parsedAnswers).includes(q.question_id) && q.type !== 'essay');
+    }
+    if (sessQuestions.length === 0) {
+      sessQuestions = questions.filter(q => q.type !== 'essay');
+    }
+
     let correctCount = 0;
     let wrongCount = 0;
 
@@ -222,9 +439,13 @@ export const ResultsPage = () => {
     return matchSession && matchKelas && matchPaket && matchSearch;
   });
 
-  // Hitung detail pertanyaan untuk activeSub saat modal review terbuka
+  // Hitung detail pertanyaan untuk activeSub saat modal review terbuka (dengan robust fallback)
   const activeQuestions = activeSub
-    ? questions.filter(q => q.session_id === activeSub.session_id)
+    ? (questions.filter(q => q.session_id === activeSub.session_id).length > 0
+        ? questions.filter(q => q.session_id === activeSub.session_id)
+        : (activeSub.parsedAnswers && Object.keys(activeSub.parsedAnswers).length > 0
+            ? questions.filter(q => Object.keys(activeSub.parsedAnswers).includes(q.question_id))
+            : questions))
     : [];
 
   const analyzedActiveQuestions = activeQuestions.map((q, idx) => {
@@ -338,16 +559,16 @@ export const ResultsPage = () => {
               Segarkan
             </Button>
 
-            {/* Tombol Ekspor Rekap Lengkap & Analisis Jawaban (.xlsx) */}
+            {/* Tombol Ekspor Rekap Lengkap & Analisis Jawaban (.xlsx) Sesuai Template */}
             <Button
               variant="secondary"
               size="sm"
               icon={Download}
               onClick={handleExportAll}
-              title="Unduh seluruh rekap nilai beserta status benar/salah setiap butir soal ke file Excel (.xlsx)"
-              className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+              title="Unduh seluruh rekap nilai beserta urutan soal template ke file Excel (.xlsx)"
+              className="border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold"
             >
-              Unduh Rekap Lengkap & Jawaban (.xlsx)
+              Unduh Excel Massal (.xlsx)
             </Button>
           </div>
         </div>
@@ -368,7 +589,7 @@ export const ResultsPage = () => {
                   <th className="py-3 px-4 text-center min-w-[130px]">Analisis PG (B/S)</th>
                   <th className="py-3 px-4 text-center min-w-[100px]">Pelanggaran</th>
                   <th className="py-3 px-4 min-w-[110px]">Waktu Selesai</th>
-                  <th className="py-3 px-4 text-center w-28">Aksi</th>
+                  <th className="py-3 px-4 text-center min-w-[140px]">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -458,17 +679,27 @@ export const ResultsPage = () => {
                         {sub.submitted_at ? new Date(sub.submitted_at).toLocaleTimeString('id-ID') : '-'}
                       </td>
 
-                      {/* Aksi */}
+                      {/* Aksi: Detail & Cetak PDF Langsung */}
                       <td className="py-3.5 px-4 text-center align-top">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={Eye}
-                          onClick={() => handleOpenReviewModal(sub)}
-                          className="border-emerald-300 text-emerald-800 hover:bg-emerald-50 text-xs py-1 px-2.5"
-                        >
-                          Lihat Detail
-                        </Button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={Eye}
+                            onClick={() => handleOpenReviewModal(sub)}
+                            className="border-emerald-300 text-emerald-800 hover:bg-emerald-50 text-xs py-1 px-2"
+                            title="Lihat rincian lembar jawaban"
+                          >
+                            Detail
+                          </Button>
+                          <button
+                            onClick={() => handlePrintPdfIndividual(sub)}
+                            className="p-1.5 rounded-xl text-slate-700 bg-slate-50 hover:bg-slate-100 transition border border-slate-200"
+                            title="Cetak / Simpan PDF Lembar Jawaban Peserta Ini"
+                          >
+                            <Printer className="w-4 h-4 text-slate-600" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -497,16 +728,27 @@ export const ResultsPage = () => {
                     NIP: {activeSub.participantIdentifier} • Kelas: <strong className="text-emerald-800">{activeSub.participantKelas}</strong> • Paket: <strong className="text-amber-900">{activeSub.participantPaket}</strong> • {activeSub.participantInstitution}
                   </p>
                 </div>
-                {/* Tombol Ekspor Perorangan */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={Download}
-                  onClick={handleExportSingle}
-                  className="border-emerald-400 text-emerald-800 hover:bg-emerald-50 text-xs font-bold shrink-0"
-                >
-                  Unduh Lembar Hasil (.xlsx)
-                </Button>
+                {/* Tombol Cetak PDF & Unduh Excel Individu */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Printer}
+                    onClick={() => handlePrintPdfIndividual(activeSub)}
+                    className="text-xs font-bold"
+                  >
+                    Cetak / Simpan PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={Download}
+                    onClick={handleExportSingleExcel}
+                    className="border-emerald-400 text-emerald-800 hover:bg-emerald-50 text-xs font-bold"
+                  >
+                    Unduh Excel (.xlsx)
+                  </Button>
+                </div>
               </div>
 
               {/* Grid 5 Metrik Nilai & Betul/Salah */}

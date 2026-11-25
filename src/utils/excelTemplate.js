@@ -482,12 +482,129 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
     return { isCorrect: false, text: String(userAns), status: '-', key };
   };
 
-  // 1. Sheet 1: Rekap Nilai Peserta
+  // Ambil daftar pertanyaan unik dari sesi terkait (sesuai urutan template Bank Soal)
+  const sessionIds = Array.from(new Set(submissions.map(s => s.session_id)));
+  let relevantQuestions = questions.filter(q => sessionIds.includes(q.session_id));
+  if (relevantQuestions.length === 0) {
+    relevantQuestions = questions;
+  }
+
+  // 1. Sheet 1: Rekap_Jawaban_Template (Sesuai Permintaan: Kolom A=No, B=Nomor Peserta, C=Nama, D=Soal 1, E=Soal 2, dst)
+  const templateHeaders = [
+    'No',
+    'Nomor Peserta',
+    'Nama',
+    'Kelas',
+    'Paket',
+    ...relevantQuestions.map((q, qIdx) => `Soal ${qIdx + 1}`),
+    'Total Benar',
+    'Total Salah',
+    'Skor PG',
+    'Nilai Essay',
+    'Nilai Akhir'
+  ];
+
+  const templateRows = submissions.map((sub, idx) => {
+    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+
+    let parsedAnswers = {};
+    try {
+      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+    } catch (e) {}
+
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    const answerCols = relevantQuestions.map(q => {
+      const userAns = parsedAnswers[q.question_id];
+      if (q.type === 'essay') {
+        return userAns ? String(userAns).replace(/\n/g, ' ') : '-';
+      }
+      const evalRes = evaluateAnswer(q, userAns);
+      if (evalRes.isCorrect) correctCount++;
+      else wrongCount++;
+      return evalRes.text || '-';
+    });
+
+    return [
+      idx + 1,
+      part?.identifier || part?.username || '-',
+      part?.full_name || part?.username || 'Peserta',
+      part?.kelas || '-',
+      part?.paket || '-',
+      ...answerCols,
+      correctCount,
+      wrongCount,
+      Number(sub.pg_score) || 0,
+      Number(sub.essay_score) || 0,
+      Number(sub.total_score) || 0
+    ];
+  });
+
+  const wsTemplate = XLSX.utils.aoa_to_sheet([templateHeaders, ...templateRows]);
+  XLSX.utils.book_append_sheet(wb, wsTemplate, 'Rekap_Jawaban_Template');
+
+  // 2. Sheet 2: Analisis_Benar_Salah (Lengkap dengan Status BENAR / SALAH per Butir)
+  const detailHeaders = [
+    'No',
+    'Nomor Peserta',
+    'Nama Peserta',
+    'Kelas',
+    'Paket',
+    'Total Nilai',
+    'PG Benar',
+    'PG Salah',
+    ...relevantQuestions.map((q, qIdx) => `Soal ${qIdx + 1} (${q.type === 'essay' ? 'Essay' : 'Kunci: ' + q.key_answer})`)
+  ];
+
+  const detailRows = submissions.map((sub, idx) => {
+    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+
+    let parsedAnswers = {};
+    try {
+      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+    } catch (e) {}
+
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    const questionResults = relevantQuestions.map(q => {
+      const userAns = parsedAnswers[q.question_id];
+      if (q.type === 'essay') {
+        return userAns ? `"${String(userAns).replace(/\n/g, ' ')}"` : '(Tidak dijawab)';
+      }
+      const evalRes = evaluateAnswer(q, userAns);
+      if (evalRes.isCorrect) {
+        correctCount++;
+        return `${evalRes.text} [BENAR]`;
+      } else {
+        wrongCount++;
+        return `${evalRes.text} [SALAH - Kunci: ${evalRes.key}]`;
+      }
+    });
+
+    return [
+      idx + 1,
+      part?.identifier || part?.username || '-',
+      part?.full_name || part?.username || 'Peserta',
+      part?.kelas || '-',
+      part?.paket || '-',
+      Number(sub.total_score) || 0,
+      correctCount,
+      wrongCount,
+      ...questionResults
+    ];
+  });
+
+  const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows]);
+  XLSX.utils.book_append_sheet(wb, wsDetail, 'Analisis_Benar_Salah');
+
+  // 3. Sheet 3: Rekap_Nilai_Peserta (Informasi Lengkap Administrasi Ujian)
   const rekapHeaders = [
     'No',
+    'Nomor Peserta',
     'Nama Lengkap',
     'Username',
-    'NIP / NIM',
     'Kelas',
     'Asal Madrasah / Sekolah',
     'Sesi Ujian',
@@ -502,7 +619,7 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
   ];
 
   const rekapRows = submissions.map((sub, idx) => {
-    const part = participants.find(p => p.participant_id === sub.participant_id);
+    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
     const sess = sessions.find(s => s.session_id === sub.session_id);
 
     let parsedAnswers = {};
@@ -510,11 +627,10 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
       parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
     } catch (e) {}
 
-    const sessQuestions = questions.filter(q => q.session_id === sub.session_id);
     let correctCount = 0;
     let wrongCount = 0;
 
-    sessQuestions.forEach(q => {
+    relevantQuestions.forEach(q => {
       if (q.type !== 'essay') {
         const evalRes = evaluateAnswer(q, parsedAnswers[q.question_id]);
         if (evalRes.isCorrect) correctCount++;
@@ -524,9 +640,9 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
 
     return [
       idx + 1,
+      part?.identifier || part?.username || '-',
       part?.full_name || part?.username || 'Peserta',
       part?.username || '-',
-      part?.identifier || '-',
       part?.kelas || '-',
       part?.institution || '-',
       sess?.title || sub.session_id,
@@ -542,80 +658,7 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
   });
 
   const wsRekap = XLSX.utils.aoa_to_sheet([rekapHeaders, ...rekapRows]);
-  wsRekap['!cols'] = [
-    { wch: 6 },
-    { wch: 30 },
-    { wch: 18 },
-    { wch: 20 },
-    { wch: 15 },
-    { wch: 30 },
-    { wch: 28 },
-    { wch: 14 },
-    { wch: 15 },
-    { wch: 18 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 16 },
-    { wch: 22 }
-  ];
   XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap_Nilai');
-
-  // 2. Sheet 2: Analisis Butir Jawaban (Jawaban & Status Benar/Salah Tiap Soal)
-  const sessionIds = Array.from(new Set(submissions.map(s => s.session_id)));
-  const relevantQuestions = questions.filter(q => sessionIds.includes(q.session_id));
-
-  const detailHeaders = [
-    'No',
-    'Nama Peserta',
-    'Kelas',
-    'Paket',
-    'Total Nilai',
-    'PG Benar',
-    'PG Salah',
-    ...relevantQuestions.map((q, qIdx) => `No.${qIdx + 1} (${q.type === 'essay' ? 'Essay' : 'Kunci: ' + q.key_answer})`)
-  ];
-
-  const detailRows = submissions.map((sub, idx) => {
-    const part = participants.find(p => p.participant_id === sub.participant_id);
-
-    let parsedAnswers = {};
-    try {
-      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
-    } catch (e) {}
-
-    let correctCount = 0;
-    let wrongCount = 0;
-
-    const questionResults = relevantQuestions.map(q => {
-      const userAns = parsedAnswers[q.question_id];
-      if (q.type === 'essay') {
-        return userAns ? `Jawaban: "${String(userAns).replace(/\n/g, ' ')}"` : '(Tidak dijawab)';
-      }
-      const evalRes = evaluateAnswer(q, userAns);
-      if (evalRes.isCorrect) {
-        correctCount++;
-        return `${evalRes.text} [BENAR]`;
-      } else {
-        wrongCount++;
-        return `${evalRes.text} [SALAH - Kunci: ${evalRes.key}]`;
-      }
-    });
-
-    return [
-      idx + 1,
-      part?.full_name || part?.username || 'Peserta',
-      part?.kelas || '-',
-      part?.paket || '-',
-      Number(sub.total_score) || 0,
-      correctCount,
-      wrongCount,
-      ...questionResults
-    ];
-  });
-
-  const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows]);
-  XLSX.utils.book_append_sheet(wb, wsDetail, 'Analisis_Jawaban_Detail');
 
   XLSX.writeFile(wb, filename);
 };
