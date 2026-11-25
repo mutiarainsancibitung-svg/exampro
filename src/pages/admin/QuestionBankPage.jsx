@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { gasApi } from '../../services/gasApi';
 import { AdminLayout } from '../../components/layout/AdminLayout';
+import { ExamSubNav } from '../../components/layout/ExamSubNav';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -362,8 +363,11 @@ export const QuestionBankPage = () => {
   }
 
   return (
-    <AdminLayout title="Manajemen Bank Soal & Template Excel">
+    <AdminLayout title="Data Bank Soal & Paket (Sub Menu 3)">
       <div className="space-y-6">
+        {/* Navigasi Sub Menu 3-Laman */}
+        <ExamSubNav active={3} />
+
         {/* Banner Status Koneksi Google Apps Script */}
         {!gasApi.isConfigured() ? (
           <div className="p-4 bg-amber-50 border border-amber-300 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">

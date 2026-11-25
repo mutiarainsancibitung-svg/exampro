@@ -12,7 +12,8 @@ import {
   UserCheck,
   Sliders,
   Database,
-  Radio
+  Radio,
+  Calendar
 } from 'lucide-react';
 
 export const AdminLayout = ({ children, title }) => {
@@ -49,8 +50,23 @@ export const AdminLayout = ({ children, title }) => {
   const allNavItems = [
     { label: 'Dashboard & Sesi', path: '/admin/dashboard', icon: LayoutDashboard, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Live Monitor Ujian', path: '/admin/monitor', icon: Radio, roles: ['superadmin', 'instructor', 'proctor'] },
-    { label: 'Atur Ujian & Mata Ujian', path: '/admin/exam-setup', icon: Sliders, roles: ['superadmin', 'instructor'] },
-    { label: 'Bank Soal & Excel', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'] },
+    
+    // Grup Sub-Menu Pengaturan Ujian & Soal (Sesuai Permintaan User)
+    {
+      isGroupHeader: true,
+      title: 'Pengaturan Ujian & Soal',
+      roles: ['superadmin', 'instructor']
+    },
+    { label: '1. Atur Ujian & Pemetaan', path: '/admin/exam-setup', icon: Sliders, roles: ['superadmin', 'instructor'], isSubMenu: true },
+    { label: '2. Data Mata Ujian / Kegiatan', path: '/admin/sessions', icon: Calendar, roles: ['superadmin', 'instructor'], isSubMenu: true },
+    { label: '3. Data Bank Soal & Paket', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'], isSubMenu: true },
+
+    // Grup Menu Peserta & Hasil
+    {
+      isGroupHeader: true,
+      title: 'Peserta & Hasil Ujian',
+      roles: ['superadmin', 'instructor', 'proctor']
+    },
     { label: 'Data Peserta & Excel', path: '/admin/participants', icon: Users, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Rekap Nilai & Essay', path: '/admin/results', icon: Award, roles: ['superadmin', 'instructor'] },
     { label: 'Cadangan & Pemulihan', path: '/admin/backup-restore', icon: Database, roles: ['superadmin'] },
@@ -110,26 +126,41 @@ export const AdminLayout = ({ children, title }) => {
         </div>
 
         {/* Menu Navigasi Berdasarkan Role */}
-        <nav className="px-3 py-2 space-y-1 flex-1">
+        <nav className="px-3 py-2 space-y-1 flex-1 overflow-y-auto">
           <div className="px-3 pb-1 text-[10px] font-bold tracking-wider uppercase text-slate-400">
-            Menu Navigasi
+            Menu Utama
           </div>
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
-                  isActive
-                    ? 'bg-kemenag-600 text-white shadow-sm shadow-kemenag-200'
-                    : 'text-slate-600 hover:bg-kemenag-50 hover:text-kemenag-800'
-                }`
-              }
-            >
-              <item.icon className="w-4 h-4 shrink-0" />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          {navItems.map((item, idx) => {
+            if (item.isGroupHeader) {
+              return (
+                <div
+                  key={'header-' + idx}
+                  className="pt-3 pb-1 px-3 text-[10px] font-black tracking-wider uppercase text-slate-400"
+                >
+                  {item.title}
+                </div>
+              );
+            }
+
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) =>
+                  `flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
+                    item.isSubMenu ? 'ml-1 pl-3' : ''
+                  } ${
+                    isActive
+                      ? 'bg-kemenag-600 text-white shadow-sm shadow-kemenag-200 font-bold'
+                      : 'text-slate-600 hover:bg-kemenag-50 hover:text-kemenag-800'
+                  }`
+                }
+              >
+                <item.icon className={`w-4 h-4 shrink-0 ${item.isSubMenu ? 'text-kemenag-600' : ''}`} />
+                <span className="truncate">{item.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
 
         {/* Footer Sidebar */}
