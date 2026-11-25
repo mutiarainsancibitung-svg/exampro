@@ -5,7 +5,13 @@
 
 import { validateRotatingToken } from '../utils/rotatingToken';
 
-const GAS_API_URL = import.meta.env.VITE_GAS_API_URL || '';
+const getGasApiUrl = () => {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('exampro_gas_api_url');
+    if (custom && custom.trim().startsWith('http')) return custom.trim();
+  }
+  return import.meta.env.VITE_GAS_API_URL || '';
+};
 
 // Mock database in-memory untuk pengujian lokal jika GAS URL belum diisi
 const MOCK_STORAGE_KEY = 'exampro_mock_db_v4';
@@ -75,7 +81,18 @@ export const gasApi = {
    * Cek apakah API GAS sudah terhubung
    */
   isConfigured: () => {
-    return Boolean(GAS_API_URL && GAS_API_URL.startsWith('http') && !GAS_API_URL.includes('AKfycbx'));
+    const url = getGasApiUrl();
+    return Boolean(url && url.startsWith('http') && !url.includes('...'));
+  },
+  getGasApiUrl: () => getGasApiUrl(),
+  setGasApiUrl: (url) => {
+    if (typeof window !== 'undefined') {
+      if (!url) {
+        localStorage.removeItem('exampro_gas_api_url');
+      } else {
+        localStorage.setItem('exampro_gas_api_url', url.trim());
+      }
+    }
   },
 
   /**
@@ -106,7 +123,7 @@ export const gasApi = {
       throw new Error('Username atau Password salah! Pastikan data akun Anda sudah dibuat oleh Admin.');
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'participantLogin', username, password })
     });
@@ -131,7 +148,7 @@ export const gasApi = {
       return { status: 'success', session: sess };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=getSession&token=${encodeURIComponent(token)}`);
+    const response = await fetch(`${getGasApiUrl()}?action=getSession&token=${encodeURIComponent(token)}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memvalidasi token');
     return data;
@@ -192,7 +209,7 @@ export const gasApi = {
       return { status: 'success', participantId, startTime, session: sess, paket: finalPaket, kelas: finalKelas };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'startExam', token, fullName, identifier, gender, sessionSalt, paket, kelas })
     });
@@ -227,7 +244,7 @@ export const gasApi = {
       return { status: 'success', session: sess, questions, paket: targetPaket };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=getExamQuestions&token=${encodeURIComponent(token)}&participantId=${encodeURIComponent(participantId)}&paket=${encodeURIComponent(paket || '')}`);
+    const response = await fetch(`${getGasApiUrl()}?action=getExamQuestions&token=${encodeURIComponent(token)}&participantId=${encodeURIComponent(participantId)}&paket=${encodeURIComponent(paket || '')}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat soal ujian');
     return data;
@@ -299,7 +316,7 @@ export const gasApi = {
       };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'submitExam', participantId, sessionId, answers, violations })
     });
@@ -373,7 +390,7 @@ export const gasApi = {
       ? { action: 'adminLogin', ...param }
       : { action: 'adminLogin', secretKey: param };
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -399,7 +416,7 @@ export const gasApi = {
       };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=getAdminDashboard&secretKey=${encodeURIComponent(secretKey)}`);
+    const response = await fetch(`${getGasApiUrl()}?action=getAdminDashboard&secretKey=${encodeURIComponent(secretKey)}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat dashboard');
     return data;
@@ -422,7 +439,7 @@ export const gasApi = {
       return { status: 'success', sessionId: session.session_id };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'saveSession', secretKey, session })
     });
@@ -433,24 +450,68 @@ export const gasApi = {
    * Simpan Soal Ujian (Admin)
    */
   async saveQuestion(secretKey, question) {
+    const preparedQuestion = {
+      ...question,
+      session_id: question.session_id || 'SES-001',
+      question_id: question.question_id || ('Q-' + Date.now() + '-' + Math.floor(Math.random() * 10000))
+    };
+
     if (!this.isConfigured()) {
       const db = getMockDb();
-      const existingIdx = db.questions.findIndex(q => q.question_id === question.question_id);
+      const existingIdx = db.questions.findIndex(q => q.question_id === preparedQuestion.question_id);
       if (existingIdx !== -1) {
-        db.questions[existingIdx] = { ...question };
+        db.questions[existingIdx] = { ...preparedQuestion };
       } else {
-        question.question_id = 'Q-' + Date.now();
-        db.questions.push(question);
+        db.questions.push(preparedQuestion);
       }
       saveMockDb(db);
-      return { status: 'success', questionId: question.question_id };
+      return { status: 'success', questionId: preparedQuestion.question_id };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
-      body: JSON.stringify({ action: 'saveQuestion', secretKey, question })
+      body: JSON.stringify({ action: 'saveQuestion', secretKey, question: preparedQuestion })
     });
-    return await response.json();
+    const data = await response.json();
+    if (data.status !== 'success') {
+      throw new Error(data.message || 'Gagal menyimpan butir soal ke database Google Sheets.');
+    }
+    return data;
+  },
+
+  /**
+   * Batch Simpan Banyak Soal Sekaligus (Admin)
+   */
+  async batchSaveQuestions(secretKey, questions, sessionId = 'SES-001') {
+    const prepared = (questions || []).map((q, idx) => ({
+      ...q,
+      session_id: sessionId || q.session_id || 'SES-001',
+      question_id: q.question_id || ('Q-' + Date.now() + '-' + (idx + 1))
+    }));
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      prepared.forEach(q => {
+        const idx = db.questions.findIndex(item => item.question_id === q.question_id);
+        if (idx !== -1) {
+          db.questions[idx] = { ...q };
+        } else {
+          db.questions.push(q);
+        }
+      });
+      saveMockDb(db);
+      return { status: 'success', message: `Berhasil menyimpan ${prepared.length} butir soal.` };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'batchSaveQuestions', secretKey, sessionId, questions: prepared })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') {
+      throw new Error(data.message || 'Gagal menyimpan batch soal ke Google Sheets.');
+    }
+    return data;
   },
 
   /**
@@ -464,7 +525,7 @@ export const gasApi = {
       return { status: 'success' };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteQuestion', secretKey, questionId })
     });
@@ -486,7 +547,7 @@ export const gasApi = {
       return { status: 'success', totalScore: sub?.total_score };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'gradeEssay', secretKey, submissionId, essayScore })
     });
@@ -512,7 +573,7 @@ export const gasApi = {
       };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({
         action: 'uploadMedia',
@@ -543,7 +604,7 @@ export const gasApi = {
       return { status: 'success', participantId: participant.participant_id };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'saveParticipant', secretKey, participant })
     });
@@ -575,7 +636,7 @@ export const gasApi = {
       return { status: 'success', message: `Berhasil menambahkan ${participants.length} peserta` };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'batchSaveParticipants', secretKey, participants })
     });
@@ -593,7 +654,7 @@ export const gasApi = {
       return { status: 'success' };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteParticipant', secretKey, participantId })
     });
@@ -609,7 +670,7 @@ export const gasApi = {
       return { status: 'success', admins: db.admins || [] };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=getAdminUsers&secretKey=${encodeURIComponent(secretKey)}`);
+    const response = await fetch(`${getGasApiUrl()}?action=getAdminUsers&secretKey=${encodeURIComponent(secretKey)}`);
     return await response.json();
   },
 
@@ -633,7 +694,7 @@ export const gasApi = {
       return { status: 'success', adminId: adminData.admin_id, message: 'Data admin berhasil disimpan.' };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'saveAdminUser', secretKey, adminData })
     });
@@ -651,7 +712,7 @@ export const gasApi = {
       return { status: 'success', message: 'Admin berhasil dihapus.' };
     }
 
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(getGasApiUrl(), {
       method: 'POST',
       body: JSON.stringify({ action: 'deleteAdminUser', secretKey, adminId })
     });
@@ -681,7 +742,7 @@ export const gasApi = {
       };
     }
 
-    const response = await fetch(`${GAS_API_URL}?action=checkAndRepair&secretKey=${encodeURIComponent(secretKey || '')}`);
+    const response = await fetch(`${getGasApiUrl()}?action=checkAndRepair&secretKey=${encodeURIComponent(secretKey || '')}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memeriksa database');
     return data;

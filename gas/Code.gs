@@ -884,14 +884,24 @@ function handleDeleteSession(payload) {
 function handleSaveQuestion(payload) {
   const { secretKey, question } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
-  if (!question || !question.session_id || !question.question_text) {
-    return { status: 'error', message: 'Data soal tidak lengkap' };
+  if (!question || !question.question_text) {
+    return { status: 'error', message: 'Data soal tidak lengkap: teks pertanyaan wajib diisi' };
   }
 
   const ss = getSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.QUESTIONS);
+  let sheet = ss.getSheetByName(SHEETS.QUESTIONS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.QUESTIONS);
+    sheet.appendRow(HEADERS.Questions);
+    formatHeaderRow(sheet, HEADERS.Questions.length);
+  } else if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS.Questions);
+    formatHeaderRow(sheet, HEADERS.Questions.length);
+  }
+
   const rows = sheet.getDataRange().getValues();
   const qId = question.question_id || ('Q-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000));
+  const sessionId = question.session_id || 'SES-001';
 
   let existingRow = -1;
   for (let i = 1; i < rows.length; i++) {
@@ -905,7 +915,7 @@ function handleSaveQuestion(payload) {
 
   const rowData = [
     qId,
-    question.session_id || 'SES-001',
+    sessionId,
     question.paket || 'Pretest',
     question.type || 'single_choice',
     question.question_text,
@@ -935,7 +945,7 @@ function handleBatchSaveQuestions(payload) {
       secretKey: secretKey,
       question: {
         ...questions[i],
-        session_id: sessionId
+        session_id: sessionId || questions[i].session_id || 'SES-001'
       }
     });
     count++;
