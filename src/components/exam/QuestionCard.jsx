@@ -91,27 +91,33 @@ export const QuestionCard = ({
       <div className="pt-2">
         {question.type === 'single_choice' && (
           <div className="space-y-3">
-            {(question.options || []).map((opt) => (
-              <OptionItem
-                key={opt.id}
-                option={opt}
-                type="single_choice"
-                isSelected={userAnswer === opt.id}
-                onSelect={() => handleSingleSelect(opt.id)}
-              />
-            ))}
+            {(question.options || []).map((opt, optIndex) => {
+              const displayLabel = String.fromCharCode(65 + optIndex); // Opsi huruf selalu urut A, B, C, D, E
+              return (
+                <OptionItem
+                  key={opt.id || optIndex}
+                  option={opt}
+                  displayLabel={displayLabel}
+                  type="single_choice"
+                  isSelected={userAnswer === opt.id}
+                  onSelect={() => handleSingleSelect(opt.id)}
+                />
+              );
+            })}
           </div>
         )}
 
         {question.type === 'multiple_choice' && (
           <div className="space-y-3">
-            {(question.options || []).map((opt) => {
+            {(question.options || []).map((opt, optIndex) => {
+              const displayLabel = String.fromCharCode(65 + optIndex); // Opsi huruf selalu urut A, B, C, D, E
               const selectedArr = Array.isArray(userAnswer) ? userAnswer : [];
               const isSelected = selectedArr.includes(opt.id);
               return (
                 <OptionItem
-                  key={opt.id}
+                  key={opt.id || optIndex}
                   option={opt}
+                  displayLabel={displayLabel}
                   type="multiple_choice"
                   isSelected={isSelected}
                   onSelect={() => handleMultipleSelect(opt.id)}

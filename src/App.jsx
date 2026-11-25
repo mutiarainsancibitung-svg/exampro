@@ -15,6 +15,7 @@ import { ParticipantsPage } from './pages/admin/ParticipantsPage';
 import { ResultsPage } from './pages/admin/ResultsPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { ExamSetupPage } from './pages/admin/ExamSetupPage';
+import { BackupRestorePage } from './pages/admin/BackupRestorePage';
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/admin/participants" element={<ParticipantsPage />} />
             <Route path="/admin/results" element={<ResultsPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/backup-restore" element={<BackupRestorePage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

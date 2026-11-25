@@ -127,6 +127,12 @@ function doPost(e) {
       case 'repairDatabase':
         responseData = checkAndRepairDatabase();
         break;
+      case 'exportFullBackup':
+        responseData = handleExportFullBackup(payload);
+        break;
+      case 'restoreFullBackup':
+        responseData = handleRestoreFullBackup(payload);
+        break;
       default:
         responseData = { status: 'error', message: 'Invalid POST action: ' + action };
     }
@@ -865,20 +871,135 @@ function handleSaveSession(payload) {
 }
 
 function handleDeleteSession(payload) {
-  const { secretKey, sessionId } = payload;
+  const { secretKey, sessionId, archiveSubmissions } = payload;
   if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
 
   const ss = getSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.SESSIONS);
-  const rows = sheet.getDataRange().getValues();
+  const sessionSheet = ss.getSheetByName(SHEETS.SESSIONS);
+  if (!sessionSheet) return { status: 'error', message: 'Sheet Sessions tidak ditemukan' };
 
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(sessionId)) {
-      sheet.deleteRow(i + 1);
-      return { status: 'success', message: 'Sesi berhasil dihapus' };
+  const sessionRows = sessionSheet.getDataRange().getValues();
+  let sessionFound = false;
+  let sessionTitle = '';
+
+  for (let i = 1; i < sessionRows.length; i++) {
+    if (String(sessionRows[i][0]) === String(sessionId)) {
+      sessionTitle = String(sessionRows[i][1] || '');
+      sessionSheet.deleteRow(i + 1);
+      sessionFound = true;
+      break;
     }
   }
-  return { status: 'error', message: 'Sesi tidak ditemukan' };
+
+  if (!sessionFound) {
+    return { status: 'error', message: 'Sesi tidak ditemukan' };
+  }
+
+  // Auto-Arsipkan Submissions / Rekap Nilai jika ada
+  let archivedCount = 0;
+  const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
+  if (subSheet && archiveSubmissions !== false) {
+    const subRows = subSheet.getDataRange().getValues();
+    const matchedSubs = [];
+    for (let r = 1; r < subRows.length; r++) {
+      if (String(subRows[r][2]) === String(sessionId)) {
+        matchedSubs.push(subRows[r]);
+      }
+    }
+
+    if (matchedSubs.length > 0) {
+      const archiveSheetName = 'Archive_Submissions';
+      let arcSheet = ss.getSheetByName(archiveSheetName);
+      if (!arcSheet) {
+        arcSheet = ss.insertSheet(archiveSheetName);
+        const headers = [...HEADERS.Submissions, 'archived_at', 'session_title'];
+        arcSheet.appendRow(headers);
+        formatHeaderRow(arcSheet, headers.length);
+      }
+
+      const now = new Date().toISOString();
+      matchedSubs.forEach(function(row) {
+        arcSheet.appendRow([...row, now, sessionTitle]);
+      });
+      archivedCount = matchedSubs.length;
+    }
+  }
+
+  return {
+    status: 'success',
+    message: `Sesi "${sessionTitle || sessionId}" berhasil dihapus.${archivedCount > 0 ? ` Sebanyak ${archivedCount} riwayat nilai berhasil diarsipkan.` : ''}`,
+    archivedCount: archivedCount
+  };
+}
+
+function handleExportFullBackup(payload) {
+  const { secretKey } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+
+  return {
+    status: 'success',
+    exportedAt: new Date().toISOString(),
+    sessions: getSheetDataAsObjects(SHEETS.SESSIONS),
+    questions: getSheetDataAsObjects(SHEETS.QUESTIONS),
+    participants: getSheetDataAsObjects(SHEETS.PARTICIPANTS),
+    submissions: getSheetDataAsObjects(SHEETS.SUBMISSIONS),
+    admins: getSheetDataAsObjects(SHEETS.ADMINS)
+  };
+}
+
+function handleRestoreFullBackup(payload) {
+  const { secretKey, backupData, mode } = payload; // mode: 'append' | 'overwrite'
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!backupData) return { status: 'error', message: 'Data backup kosong' };
+
+  const ss = getSpreadsheet();
+  const report = {};
+
+  const sheetKeys = [
+    { key: 'sessions', sheetName: SHEETS.SESSIONS, headers: HEADERS.Sessions },
+    { key: 'questions', sheetName: SHEETS.QUESTIONS, headers: HEADERS.Questions },
+    { key: 'participants', sheetName: SHEETS.PARTICIPANTS, headers: HEADERS.Participants },
+    { key: 'submissions', sheetName: SHEETS.SUBMISSIONS, headers: HEADERS.Submissions },
+    { key: 'admins', sheetName: SHEETS.ADMINS, headers: HEADERS.Admins }
+  ];
+
+  sheetKeys.forEach(function(item) {
+    const list = backupData[item.key] || [];
+    if (!Array.isArray(list) || list.length === 0) return;
+
+    let sheet = ss.getSheetByName(item.sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(item.sheetName);
+      sheet.appendRow(item.headers);
+      formatHeaderRow(sheet, item.headers.length);
+    }
+
+    if (mode === 'overwrite') {
+      sheet.clearContents();
+      sheet.appendRow(item.headers);
+      formatHeaderRow(sheet, item.headers.length);
+    }
+
+    let inserted = 0;
+    list.forEach(function(obj) {
+      const row = item.headers.map(function(h) {
+        const val = obj[h];
+        if (typeof val === 'object' && val !== null) {
+          return JSON.stringify(val);
+        }
+        return val !== undefined ? val : '';
+      });
+      sheet.appendRow(row);
+      inserted++;
+    });
+    report[item.key] = inserted;
+  });
+
+  return {
+    status: 'success',
+    message: 'Data backup berhasil dipulihkan ke Google Sheets.',
+    report: report
+  };
 }
 
 function handleSaveQuestion(payload) {

@@ -7,6 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
+import * as XLSX from 'xlsx';
 import {
   Sliders,
   BookOpen,
@@ -26,7 +27,9 @@ import {
   ToggleLeft,
   ToggleRight,
   Check,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Download
 } from 'lucide-react';
 
 export const ExamSetupPage = () => {
@@ -37,7 +40,13 @@ export const ExamSetupPage = () => {
   const [sessions, setSessions] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [participants, setParticipants] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // State Hapus Sesi & Auto-Backup Proteksi
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false);
+  const [deletingSessionLoading, setDeletingSessionLoading] = useState(false);
 
   // Active Tab
   const [activeTab, setActiveTab] = useState('mapping'); // 'mapping' | 'activities' | 'questions'
@@ -83,10 +92,12 @@ export const ExamSetupPage = () => {
         const sessList = res.sessions || [];
         const qList = res.questions || [];
         const parts = res.participants || [];
+        const subs = res.submissions || [];
 
         setSessions(sessList);
         setQuestions(qList);
         setParticipants(parts);
+        setSubmissions(subs);
 
         // Inisialisasi pilihan default jika belum dipilih
         if (sessList.length > 0 && !selectedSessionId) {
@@ -169,6 +180,85 @@ export const ExamSetupPage = () => {
       loadData();
     } catch (err) {
       alert('Gagal mengubah status: ' + err.message);
+    }
+  };
+
+  // Permintaan Hapus Sesi Ujian (dengan proteksi auto-backup jika memiliki nilai pengerjaan)
+  const handleRequestDeleteSession = (sess) => {
+    if (!sess) return;
+    if (sessions.length <= 1) {
+      alert('Tidak dapat menghapus sesi ini! Sistem harus memiliki minimal 1 sesi ujian aktif.');
+      return;
+    }
+
+    const related = (submissions || []).filter(
+      sub => String(sub.session_id) === String(sess.session_id)
+    );
+
+    setSessionToDelete({
+      ...sess,
+      submissionsCount: related.length,
+      relatedSubmissions: related
+    });
+
+    if (related.length > 0) {
+      setShowDeleteSessionModal(true);
+    } else {
+      if (window.confirm(`Yakin ingin menghapus sesi "${sess.title}"? Sesi ini belum memiliki nilai peserta.`)) {
+        executeDeleteSession(sess, false);
+      }
+    }
+  };
+
+  // Eksekusi Hapus Sesi Ujian (Unduh file backup Excel otomatis + arsipkan cloud)
+  const executeDeleteSession = async (sess, doAutoBackup = true) => {
+    setDeletingSessionLoading(true);
+    try {
+      // 1. Jika ada submission dan doAutoBackup true, download file Excel nilai otomatis
+      if (doAutoBackup && sess.relatedSubmissions && sess.relatedSubmissions.length > 0) {
+        const wb = XLSX.utils.book_new();
+        const exportRows = sess.relatedSubmissions.map((sub, idx) => {
+          const part = participants.find(p => p.participant_id === sub.participant_id);
+          return {
+            No: idx + 1,
+            Submission_ID: sub.submission_id,
+            Sesi_Ujian: sess.title,
+            Nama_Peserta: part?.full_name || sub.participant_id,
+            Username: part?.username || '-',
+            Kelas: part?.kelas || '-',
+            Skor_PG: sub.pg_score || 0,
+            Skor_Essay: sub.essay_score || 0,
+            Total_Nilai: sub.total_score || 0,
+            Pelanggaran_Tab: sub.tab_switch_count || 0,
+            Waktu_Kirim: sub.submitted_at || ''
+          };
+        });
+        const ws = XLSX.utils.json_to_sheet(exportRows);
+        XLSX.utils.book_append_sheet(wb, ws, 'Rekap_Nilai_Backup');
+        const cleanTitle = (sess.title || 'Sesi').replace(/[^a-zA-Z0-9]/g, '_');
+        const fileName = `Backup_Nilai_${cleanTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+      }
+
+      // 2. Panggil API hapus sesi (dengan auto-archive di Google Sheets)
+      const res = await gasApi.deleteSession(adminSecretKey, sess.session_id, true);
+      alert(res.message || 'Sesi berhasil dihapus');
+      setShowDeleteSessionModal(false);
+      setSessionToDelete(null);
+
+      // Jika sesi yang dihapus sedang terpilih di Langkah 1, reset pilihan
+      if (selectedSessionId === sess.session_id) {
+        const remaining = sessions.filter(s => s.session_id !== sess.session_id);
+        if (remaining.length > 0) {
+          setSelectedSessionId(remaining[0].session_id);
+        }
+      }
+
+      loadData();
+    } catch (err) {
+      alert('Gagal menghapus sesi: ' + err.message);
+    } finally {
+      setDeletingSessionLoading(false);
     }
   };
 
@@ -397,6 +487,20 @@ export const ExamSetupPage = () => {
                     <span className="mx-1">•</span>
                     <Key className="w-3.5 h-3.5 text-slate-400" /> Token: <strong className="font-mono text-kemenag-800">{activeSession?.token || '-'}</strong>
                   </p>
+                  <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-100 text-[11px]">
+                    <button
+                      onClick={() => handleOpenEditSession(activeSession)}
+                      className="text-slate-600 font-semibold hover:text-slate-900"
+                    >
+                      Edit Sesi Ini
+                    </button>
+                    <button
+                      onClick={() => handleRequestDeleteSession(activeSession)}
+                      className="text-rose-600 font-semibold hover:text-rose-800 flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Hapus Sesi
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -742,12 +846,20 @@ export const ExamSetupPage = () => {
                     >
                       Pilih & Atur Pemetaan &rarr;
                     </button>
-                    <button
-                      onClick={() => handleOpenEditSession(sess)}
-                      className="text-slate-500 font-semibold hover:text-slate-800"
-                    >
-                      Edit Sesi
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleOpenEditSession(sess)}
+                        className="text-slate-500 font-semibold hover:text-slate-800"
+                      >
+                        Edit Sesi
+                      </button>
+                      <button
+                        onClick={() => handleRequestDeleteSession(sess)}
+                        className="text-rose-600 font-semibold hover:text-rose-800 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Hapus
+                      </button>
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -935,6 +1047,56 @@ export const ExamSetupPage = () => {
           </form>
         </Modal>
       )}
+
+      {/* Modal Proteksi Hapus Sesi Ujian & Auto-Backup */}
+      <Modal
+        isOpen={showDeleteSessionModal}
+        onClose={() => !deletingSessionLoading && setShowDeleteSessionModal(false)}
+        title="Konfirmasi Hapus Sesi Ujian & Auto-Backup"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-900 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>Peringatan: Sesi Memiliki Data Nilai Peserta!</span>
+            </div>
+            <p>
+              Sesi <strong>"{sessionToDelete?.title}"</strong> memiliki{' '}
+              <strong className="text-amber-950 font-bold underline">
+                {sessionToDelete?.submissionsCount} riwayat pengerjaan nilai peserta
+              </strong>.
+            </p>
+            <p className="text-[11px] text-amber-800 leading-relaxed">
+              Untuk melindungi nilai peserta dari kehilangan, sistem akan secara otomatis:
+            </p>
+            <ul className="list-disc list-inside space-y-1 text-[11px] font-semibold text-emerald-900 bg-white/70 p-2.5 rounded-xl border border-amber-200">
+              <li>✅ Mengunduh file Excel rekap nilai (.xlsx) ke laptop/PC Anda.</li>
+              <li>✅ Menyalin data nilai ke lembar arsip cloud Google Sheets (Archive_Submissions).</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t border-slate-100">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={deletingSessionLoading}
+              onClick={() => setShowDeleteSessionModal(false)}
+            >
+              Batalkan
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
+              disabled={deletingSessionLoading}
+              onClick={() => executeDeleteSession(sessionToDelete, true)}
+              icon={Download}
+            >
+              {deletingSessionLoading ? 'Memproses Backup...' : 'Backup Nilai & Hapus Sesi'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AdminLayout>
   );
 };

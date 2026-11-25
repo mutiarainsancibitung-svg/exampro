@@ -443,7 +443,94 @@ export const gasApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'saveSession', secretKey, session })
     });
-    return await response.json();
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal menyimpan sesi');
+    return data;
+  },
+
+  /**
+   * Hapus Sesi Ujian (Admin) dengan Opsi Auto-Arsip Rekap Nilai
+   */
+  async deleteSession(secretKey, sessionId, archiveSubmissions = true) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const sessIdx = db.sessions.findIndex(s => s.session_id === sessionId);
+      if (sessIdx !== -1) {
+        db.sessions.splice(sessIdx, 1);
+      }
+      if (archiveSubmissions) {
+        db.archivedSubmissions = db.archivedSubmissions || [];
+        const related = (db.submissions || []).filter(sub => sub.session_id === sessionId);
+        related.forEach(sub => db.archivedSubmissions.push({ ...sub, archived_at: new Date().toISOString() }));
+      }
+      saveMockDb(db);
+      return { status: 'success', message: 'Sesi berhasil dihapus (mode lokal)' };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteSession', secretKey, sessionId, archiveSubmissions })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal menghapus sesi ujian');
+    return data;
+  },
+
+  /**
+   * Ekspor Full Master Backup Seluruh Database (Sessions, Questions, Participants, Submissions, Admins)
+   */
+  async exportFullBackup(secretKey) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      return {
+        status: 'success',
+        exportedAt: new Date().toISOString(),
+        sessions: db.sessions || [],
+        questions: db.questions || [],
+        participants: db.participants || [],
+        submissions: db.submissions || [],
+        admins: db.admins || []
+      };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'exportFullBackup', secretKey })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal mengekspor data backup');
+    return data;
+  },
+
+  /**
+   * Pulihkan Full Backup ke Database (Mode Append atau Overwrite)
+   */
+  async restoreFullBackup(secretKey, backupData, mode = 'append') {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      if (mode === 'overwrite') {
+        db.sessions = backupData.sessions || [];
+        db.questions = backupData.questions || [];
+        db.participants = backupData.participants || [];
+        db.submissions = backupData.submissions || [];
+        db.admins = backupData.admins || [];
+      } else {
+        // Append / merge
+        ['sessions', 'questions', 'participants', 'submissions', 'admins'].forEach(key => {
+          db[key] = [...(db[key] || []), ...(backupData[key] || [])];
+        });
+      }
+      saveMockDb(db);
+      return { status: 'success', message: 'Backup berhasil dipulihkan (mode lokal)' };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'restoreFullBackup', secretKey, backupData, mode })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal memulihkan data backup');
+    return data;
   },
 
   /**

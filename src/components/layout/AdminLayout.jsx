@@ -10,7 +10,8 @@ import {
   ExternalLink,
   ShieldCheck,
   UserCheck,
-  Sliders
+  Sliders,
+  Database
 } from 'lucide-react';
 
 export const AdminLayout = ({ children, title }) => {
@@ -50,6 +51,7 @@ export const AdminLayout = ({ children, title }) => {
     { label: 'Bank Soal & Excel', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'] },
     { label: 'Data Peserta & Excel', path: '/admin/participants', icon: Users, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Rekap Nilai & Essay', path: '/admin/results', icon: Award, roles: ['superadmin', 'instructor'] },
+    { label: 'Cadangan & Pemulihan', path: '/admin/backup-restore', icon: Database, roles: ['superadmin'] },
     { label: 'Kelola Admin & Role', path: '/admin/users', icon: ShieldCheck, roles: ['superadmin'] }
   ];
 

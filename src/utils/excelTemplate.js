@@ -124,19 +124,21 @@ export const parseUploadedQuestionsFile = async (file) => {
     throw new Error('File Excel kosong atau tidak memiliki baris data.');
   }
 
-  // Header detection
+  // Header detection yang akurat (mencegah 'Jenis_Soal' tertukar dengan 'Teks_Soal')
   const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
   const idxPaket = headerRow.findIndex(h => h.includes('paket'));
-  const idxType = headerRow.findIndex(h => h.includes('jenis') || h.includes('tipe'));
-  const idxText = headerRow.findIndex(h => h.includes('teks') || h.includes('soal') || h.includes('pertanyaan'));
-  const idxImg = headerRow.findIndex(h => h.includes('gambar'));
-  const idxA = headerRow.findIndex(h => h.includes('opsi_a') || h === 'a');
-  const idxB = headerRow.findIndex(h => h.includes('opsi_b') || h === 'b');
-  const idxC = headerRow.findIndex(h => h.includes('opsi_c') || h === 'c');
-  const idxD = headerRow.findIndex(h => h.includes('opsi_d') || h === 'd');
-  const idxE = headerRow.findIndex(h => h.includes('opsi_e') || h === 'e');
-  const idxKey = headerRow.findIndex(h => h.includes('kunci'));
-  const idxWeight = headerRow.findIndex(h => h.includes('bobot'));
+  const idxType = headerRow.findIndex(h => h.includes('jenis') || h.includes('tipe') || h === 'type');
+  const idxText = headerRow.findIndex((h, idx) => 
+    idx !== idxType && (h.includes('teks') || h.includes('pertanyaan') || (h.includes('soal') && !h.includes('jenis') && !h.includes('tipe')))
+  );
+  const idxImg = headerRow.findIndex(h => h.includes('gambar') || h.includes('image') || h.includes('foto'));
+  const idxA = headerRow.findIndex(h => h.includes('opsi_a') || h === 'a' || h === 'opsi a');
+  const idxB = headerRow.findIndex(h => h.includes('opsi_b') || h === 'b' || h === 'opsi b');
+  const idxC = headerRow.findIndex(h => h.includes('opsi_c') || h === 'c' || h === 'opsi c');
+  const idxD = headerRow.findIndex(h => h.includes('opsi_d') || h === 'd' || h === 'opsi d');
+  const idxE = headerRow.findIndex(h => h.includes('opsi_e') || h === 'e' || h === 'opsi e');
+  const idxKey = headerRow.findIndex(h => h.includes('kunci') || h.includes('jawaban') || h.includes('key'));
+  const idxWeight = headerRow.findIndex(h => h.includes('bobot') || h.includes('score') || h.includes('poin') || h.includes('weight'));
 
   const parsedQuestions = [];
 
@@ -146,7 +148,10 @@ export const parseUploadedQuestionsFile = async (file) => {
 
     const paket = (idxPaket !== -1 ? String(row[idxPaket] || '') : String(row[1] || '')).trim() || 'Pretest';
     const typeRaw = (idxType !== -1 ? String(row[idxType] || '') : String(row[2] || '')).trim().toLowerCase();
-    const qText = (idxText !== -1 ? String(row[idxText] || '') : String(row[3] || '')).trim();
+    
+    // Pastikan teks soal diambil dari kolom teks_soal (biasanya index 3), bukan dari kolom jenis_soal
+    const targetIdxText = idxText !== -1 ? idxText : 3;
+    const qText = String(row[targetIdxText] || '').trim();
 
     if (!qText) continue;
 

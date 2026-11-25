@@ -3,11 +3,13 @@ import { ZoomIn, X } from 'lucide-react';
 
 export const OptionItem = ({
   option,
+  displayLabel,
   type = 'single_choice',
   isSelected = false,
   onSelect
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
+  const badgeLabel = displayLabel || option.label || option.id;
 
   return (
     <div
@@ -28,7 +30,7 @@ export const OptionItem = ({
                 : 'border-slate-300 text-slate-500 group-hover:border-slate-400'
             }`}
           >
-            {option.id}
+            {badgeLabel}
           </div>
         ) : (
           <div
@@ -38,7 +40,7 @@ export const OptionItem = ({
                 : 'border-slate-300 text-slate-500 group-hover:border-slate-400'
             }`}
           >
-            {option.id}
+            {badgeLabel}
           </div>
         )}
       </div>
