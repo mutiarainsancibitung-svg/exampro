@@ -445,3 +445,264 @@ export const parseUploadedParticipantFile = async (file) => {
 
   return parsedParticipants;
 };
+
+// ==========================================
+// 3. EKSPOR HASIL UJIAN & ANALISIS BUTIR JAWABAN
+// ==========================================
+
+/**
+ * Ekspor Rekap Nilai Lengkap beserta Analisis Butir Jawaban (Benar / Salah) ke File Excel (.xlsx)
+ */
+export const exportDetailedResultsToExcel = (submissions, questions, participants, sessions, filename = 'Rekap_Hasil_Ujian_Lengkap.xlsx') => {
+  const wb = XLSX.utils.book_new();
+
+  // Helper evaluasi jawaban
+  const evaluateAnswer = (q, userAns) => {
+    if (q.type === 'essay') {
+      return { isEssay: true, text: String(userAns || '').trim() || '(Tidak dijawab)' };
+    }
+    const key = String(q.key_answer || '').trim().toUpperCase();
+    if (!userAns) return { isCorrect: false, text: '(Kosong)', status: 'KOSONG', key };
+
+    if (q.type === 'single_choice') {
+      const u = String(userAns).trim().toUpperCase();
+      const isCorrect = u === key;
+      return { isCorrect, text: u, status: isCorrect ? 'BENAR' : 'SALAH', key };
+    }
+
+    if (q.type === 'multiple_choice') {
+      const u = Array.isArray(userAns)
+        ? userAns.map(a => String(a).trim().toUpperCase()).sort().join(',')
+        : String(userAns).split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+      const k = key.split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+      const isCorrect = u === k && u.length > 0;
+      return { isCorrect, text: u, status: isCorrect ? 'BENAR' : 'SALAH', key: k };
+    }
+
+    return { isCorrect: false, text: String(userAns), status: '-', key };
+  };
+
+  // 1. Sheet 1: Rekap Nilai Peserta
+  const rekapHeaders = [
+    'No',
+    'Nama Lengkap',
+    'Username',
+    'NIP / NIM',
+    'Kelas',
+    'Asal Madrasah / Sekolah',
+    'Sesi Ujian',
+    'Paket Soal',
+    'Skor PG (0-100)',
+    'Nilai Essay (0-100)',
+    'Nilai Total',
+    'Soal PG Benar',
+    'Soal PG Salah',
+    'Pelanggaran Tab',
+    'Waktu Selesai'
+  ];
+
+  const rekapRows = submissions.map((sub, idx) => {
+    const part = participants.find(p => p.participant_id === sub.participant_id);
+    const sess = sessions.find(s => s.session_id === sub.session_id);
+
+    let parsedAnswers = {};
+    try {
+      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+    } catch (e) {}
+
+    const sessQuestions = questions.filter(q => q.session_id === sub.session_id);
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    sessQuestions.forEach(q => {
+      if (q.type !== 'essay') {
+        const evalRes = evaluateAnswer(q, parsedAnswers[q.question_id]);
+        if (evalRes.isCorrect) correctCount++;
+        else wrongCount++;
+      }
+    });
+
+    return [
+      idx + 1,
+      part?.full_name || part?.username || 'Peserta',
+      part?.username || '-',
+      part?.identifier || '-',
+      part?.kelas || '-',
+      part?.institution || '-',
+      sess?.title || sub.session_id,
+      part?.paket || '-',
+      Number(sub.pg_score) || 0,
+      Number(sub.essay_score) || 0,
+      Number(sub.total_score) || 0,
+      correctCount,
+      wrongCount,
+      Number(sub.tab_switch_count) || 0,
+      sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID') : '-'
+    ];
+  });
+
+  const wsRekap = XLSX.utils.aoa_to_sheet([rekapHeaders, ...rekapRows]);
+  wsRekap['!cols'] = [
+    { wch: 6 },
+    { wch: 30 },
+    { wch: 18 },
+    { wch: 20 },
+    { wch: 15 },
+    { wch: 30 },
+    { wch: 28 },
+    { wch: 14 },
+    { wch: 15 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 22 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap_Nilai');
+
+  // 2. Sheet 2: Analisis Butir Jawaban (Jawaban & Status Benar/Salah Tiap Soal)
+  const sessionIds = Array.from(new Set(submissions.map(s => s.session_id)));
+  const relevantQuestions = questions.filter(q => sessionIds.includes(q.session_id));
+
+  const detailHeaders = [
+    'No',
+    'Nama Peserta',
+    'Kelas',
+    'Paket',
+    'Total Nilai',
+    'PG Benar',
+    'PG Salah',
+    ...relevantQuestions.map((q, qIdx) => `No.${qIdx + 1} (${q.type === 'essay' ? 'Essay' : 'Kunci: ' + q.key_answer})`)
+  ];
+
+  const detailRows = submissions.map((sub, idx) => {
+    const part = participants.find(p => p.participant_id === sub.participant_id);
+
+    let parsedAnswers = {};
+    try {
+      parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+    } catch (e) {}
+
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    const questionResults = relevantQuestions.map(q => {
+      const userAns = parsedAnswers[q.question_id];
+      if (q.type === 'essay') {
+        return userAns ? `Jawaban: "${String(userAns).replace(/\n/g, ' ')}"` : '(Tidak dijawab)';
+      }
+      const evalRes = evaluateAnswer(q, userAns);
+      if (evalRes.isCorrect) {
+        correctCount++;
+        return `${evalRes.text} [BENAR]`;
+      } else {
+        wrongCount++;
+        return `${evalRes.text} [SALAH - Kunci: ${evalRes.key}]`;
+      }
+    });
+
+    return [
+      idx + 1,
+      part?.full_name || part?.username || 'Peserta',
+      part?.kelas || '-',
+      part?.paket || '-',
+      Number(sub.total_score) || 0,
+      correctCount,
+      wrongCount,
+      ...questionResults
+    ];
+  });
+
+  const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows]);
+  XLSX.utils.book_append_sheet(wb, wsDetail, 'Analisis_Jawaban_Detail');
+
+  XLSX.writeFile(wb, filename);
+};
+
+/**
+ * Ekspor Lembar Hasil Jawaban Perorangan Peserta ke File Excel (.xlsx)
+ */
+export const exportSingleParticipantResultToExcel = (sub, questions, participant, session, filename) => {
+  const wb = XLSX.utils.book_new();
+
+  let parsedAnswers = {};
+  try {
+    parsedAnswers = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : (sub.answers_json || {});
+  } catch (e) {}
+
+  const sessQuestions = questions.filter(q => q.session_id === sub.session_id);
+
+  const infoRows = [
+    ['LEMBAR HASIL JAWABAN PESERTA UJIAN CBT'],
+    ['Nama Peserta', participant?.full_name || participant?.username || '-'],
+    ['Username', participant?.username || '-'],
+    ['NIP / NIM', participant?.identifier || '-'],
+    ['Kelas', participant?.kelas || '-'],
+    ['Asal Sekolah / Instansi', participant?.institution || '-'],
+    ['Mata Ujian / Sesi', session?.title || sub.session_id],
+    ['Paket Soal', participant?.paket || '-'],
+    ['Skor Pilihan Ganda (PG)', Number(sub.pg_score) || 0],
+    ['Nilai Essay', Number(sub.essay_score) || 0],
+    ['Total Nilai Akhir', Number(sub.total_score) || 0],
+    ['Pelanggaran Tab', `${Number(sub.tab_switch_count) || 0} kali`],
+    ['Waktu Pengumpulan', sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('id-ID') : '-'],
+    []
+  ];
+
+  const tableHeaders = [
+    'No',
+    'Tipe Soal',
+    'Teks Soal',
+    'Jawaban Peserta',
+    'Kunci Jawaban',
+    'Status Hasil',
+    'Bobot Poin'
+  ];
+
+  const tableRows = sessQuestions.map((q, idx) => {
+    const userAns = parsedAnswers[q.question_id];
+    let statusHasil = '-';
+    let userAnsText = String(userAns || '(Kosong)');
+    let keyAnsText = String(q.key_answer || '-');
+
+    if (q.type === 'single_choice') {
+      const isCorrect = userAns && String(userAns).trim().toUpperCase() === keyAnsText.trim().toUpperCase();
+      statusHasil = isCorrect ? 'BETUL (BENAR)' : 'SALAH';
+    } else if (q.type === 'multiple_choice') {
+      const u = Array.isArray(userAns)
+        ? userAns.map(a => String(a).trim().toUpperCase()).sort().join(',')
+        : String(userAns || '').split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+      const k = keyAnsText.split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+      const isCorrect = u === k && u.length > 0;
+      statusHasil = isCorrect ? 'BETUL (BENAR)' : 'SALAH';
+    } else if (q.type === 'essay') {
+      statusHasil = `Dinilai Essay (Skor: ${sub.essay_score || 0})`;
+      keyAnsText = `Rubrik: ${q.key_answer || '-'}`;
+    }
+
+    return [
+      idx + 1,
+      q.type === 'single_choice' ? 'Pilihan Ganda' : q.type === 'multiple_choice' ? 'Pilihan Jamak' : 'Essay',
+      q.question_text || '',
+      userAnsText,
+      keyAnsText,
+      statusHasil,
+      Number(q.weight) || 1
+    ];
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet([...infoRows, tableHeaders, ...tableRows]);
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 16 },
+    { wch: 50 },
+    { wch: 25 },
+    { wch: 25 },
+    { wch: 20 },
+    { wch: 12 }
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Lembar_Jawaban');
+  XLSX.writeFile(wb, filename || `Hasil_${participant?.username || 'Peserta'}.xlsx`);
+};
