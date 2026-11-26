@@ -461,9 +461,11 @@ export const gasApi = {
           start_time: p.start_time,
           status,
           is_online: isOnline,
-          answered_count: live.answeredCount || (sub ? Object.keys(sub.answers || {}).length : 0),
+          answered_count: isSubmitted
+            ? (sub ? Object.keys(sub.answers || {}).length || 25 : 25)
+            : (live.answeredCount || 0),
           total_questions: live.totalQuestions || 25,
-          violations: Number(sub ? sub.violations : (live.violations || 0)),
+          violations: Number(sub ? (sub.tab_switch_count !== undefined ? sub.tab_switch_count : sub.violations) : (live.violations || 0)) || 0,
           last_violation_msg: live.lastViolationMsg || '',
           last_heartbeat: live.lastHeartbeat || null,
           score: sub ? (sub.total_score || sub.pg_score || 0) : null

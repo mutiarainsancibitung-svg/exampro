@@ -181,8 +181,10 @@ export const ResultsPage = () => {
 
     let correctCount = 0;
     let wrongCount = 0;
+    let earnedPgWeight = 0;
 
     const questionRowsHtml = sessQuestions.map((q, idx) => {
+      const qWeight = Number(q.weight) || 1;
       const userAns = parsedAnswers[q.question_id];
       const evalRes = evaluateQuestion(q, userAns);
 
@@ -191,6 +193,7 @@ export const ResultsPage = () => {
         statusBadge = `<span style="background:#f3e8ff;color:#6b21a8;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">Dinilai Essay (${sub.essay_score || 0}/100)</span>`;
       } else if (evalRes.isCorrect) {
         correctCount++;
+        earnedPgWeight += qWeight;
         statusBadge = `<span style="background:#dcfce7;color:#166534;padding:3px 8px;border-radius:6px;font-weight:bold;font-size:11px;">&#10003; BETUL (BENAR)</span>`;
       } else if (evalRes.isBlank) {
         wrongCount++;
@@ -221,6 +224,16 @@ export const ResultsPage = () => {
         </tr>
       `;
     }).join('');
+
+    const finalPgScore = earnedPgWeight > 0 ? earnedPgWeight : (Number(sub.pg_score) || 0);
+    const finalEssayScore = Number(sub.essay_score) || 0;
+    const finalTotalScore = finalPgScore + finalEssayScore;
+
+    let cleanPaket = part?.paket || sess?.type || 'Pretest';
+    if (/^\d{4}-\d{2}-\d{2}T/.test(cleanPaket) || cleanPaket === '-') {
+      cleanPaket = sess?.type || 'Pretest';
+    }
+    const cleanKelas = (part?.kelas && part.kelas !== '-') ? part.kelas : (sess?.type ? 'PAI' : '-');
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -285,7 +298,7 @@ export const ResultsPage = () => {
             <td style="font-weight: bold;">Nomor Peserta / NIP</td>
             <td>: ${part?.identifier || part?.username || '-'}</td>
             <td style="font-weight: bold;">Kelas & Paket</td>
-            <td>: ${part?.kelas || '-'} (${part?.paket || '-'})</td>
+            <td>: ${cleanKelas} (${cleanPaket})</td>
           </tr>
           <tr>
             <td style="font-weight: bold;">Asal Madrasah/Sekolah</td>
@@ -300,19 +313,19 @@ export const ResultsPage = () => {
             <div style="display: table-cell; width: 20%; padding: 3px;">
               <div class="metric-box" style="background:#ecfdf5; border-color:#a7f3d0;">
                 <div class="label" style="color:#065f46;">Nilai Total</div>
-                <div class="val" style="color:#047857;">${sub.total_score}</div>
+                <div class="val" style="color:#047857;">${finalTotalScore}</div>
               </div>
             </div>
             <div style="display: table-cell; width: 20%; padding: 3px;">
               <div class="metric-box">
                 <div class="label">Skor PG</div>
-                <div class="val" style="color:#0f766e;">${sub.pg_score}</div>
+                <div class="val" style="color:#0f766e;">${finalPgScore}</div>
               </div>
             </div>
             <div style="display: table-cell; width: 20%; padding: 3px;">
               <div class="metric-box">
                 <div class="label">Skor Essay</div>
-                <div class="val" style="color:#7e22ce;">${sub.essay_score || 0}</div>
+                <div class="val" style="color:#7e22ce;">${finalEssayScore}</div>
               </div>
             </div>
             <div style="display: table-cell; width: 20%; padding: 3px;">
@@ -383,7 +396,6 @@ export const ResultsPage = () => {
 
   // Gabungkan info peserta & sesi ke data submisi
   const enrichedSubmissions = submissions.map(sub => {
-    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
     const sess = sessions.find(s => s.session_id === sub.session_id);
 
     let parsedAnswers = {};
@@ -403,21 +415,50 @@ export const ResultsPage = () => {
 
     let correctCount = 0;
     let wrongCount = 0;
+    let earnedPgWeight = 0;
 
     sessQuestions.forEach(q => {
+      const qWeight = Number(q.weight) || 1;
       const evalRes = evaluateQuestion(q, parsedAnswers[q.question_id]);
-      if (evalRes.isCorrect) correctCount++;
-      else wrongCount++;
+      if (evalRes.isCorrect) {
+        correctCount++;
+        earnedPgWeight += qWeight;
+      } else {
+        wrongCount++;
+      }
     });
+
+    // Sesuai rumus ujian: Skor PG = Total Benar * Bobot Soal (misal: 5 benar * bobot 2 = 10)
+    const finalPgScore = earnedPgWeight > 0 ? earnedPgWeight : (Number(sub.pg_score) || 0);
+    const finalEssayScore = Number(sub.essay_score) || 0;
+    const finalTotalScore = finalPgScore + finalEssayScore;
+
+    // Cari profil peserta asli: prioritaskan pencocokan username/identifier agar tidak tertukar dengan baris duplikat
+    const part = participants.find(p => 
+      (p.username && (String(p.username).toLowerCase() === String(sub.participant_id).toLowerCase() || String(p.username).toLowerCase() === String(sub.username || '').toLowerCase())) ||
+      (p.identifier && String(p.identifier).toLowerCase() === String(sub.participant_id).toLowerCase()) ||
+      (p.participant_id && String(p.participant_id).toLowerCase() === String(sub.participant_id).toLowerCase())
+    ) || participants.find(p => p.participant_id === sub.participant_id);
+
+    // Sanitasi nama paket agar TIDAK memunculkan string ISO timestamp
+    let cleanPaket = part?.paket || sess?.type || 'Pretest';
+    if (/^\d{4}-\d{2}-\d{2}T/.test(cleanPaket) || cleanPaket === '-') {
+      cleanPaket = sess?.type || 'Pretest';
+    }
+
+    const cleanKelas = (part?.kelas && part.kelas !== '-') ? part.kelas : (sess?.type ? 'PAI' : '-');
 
     return {
       ...sub,
+      pg_score: finalPgScore,
+      essay_score: finalEssayScore,
+      total_score: finalTotalScore,
       participantName: part?.full_name || part?.username || 'Peserta PAI',
       participantUsername: part?.username || '-',
-      participantIdentifier: part?.identifier || '-',
-      participantKelas: part?.kelas || '-',
+      participantIdentifier: part?.identifier || part?.username || '-',
+      participantKelas: cleanKelas,
       participantInstitution: part?.institution || '-',
-      participantPaket: part?.paket || '-',
+      participantPaket: cleanPaket,
       sessionTitle: sess?.title || '-',
       correctCount,
       wrongCount,

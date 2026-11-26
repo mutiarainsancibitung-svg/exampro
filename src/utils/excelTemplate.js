@@ -505,7 +505,15 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
   ];
 
   const templateRows = submissions.map((sub, idx) => {
-    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+    const part = participants.find(p => 
+      (p.username && (String(p.username).toLowerCase() === String(sub.participant_id).toLowerCase() || String(p.username).toLowerCase() === String(sub.username || '').toLowerCase())) ||
+      (p.identifier && String(p.identifier).toLowerCase() === String(sub.participant_id).toLowerCase()) ||
+      (p.participant_id && String(p.participant_id).toLowerCase() === String(sub.participant_id).toLowerCase())
+    ) || participants.find(p => p.participant_id === sub.participant_id);
+
+    let cleanPaket = part?.paket || 'Pretest';
+    if (/^\d{4}-\d{2}-\d{2}T/.test(cleanPaket) || cleanPaket === '-') cleanPaket = 'Pretest';
+    const cleanKelas = (part?.kelas && part.kelas !== '-') ? part.kelas : 'PAI';
 
     let parsedAnswers = {};
     try {
@@ -514,30 +522,40 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
 
     let correctCount = 0;
     let wrongCount = 0;
+    let earnedPgWeight = 0;
 
     const answerCols = relevantQuestions.map(q => {
+      const qWeight = Number(q.weight) || 1;
       const userAns = parsedAnswers[q.question_id];
       if (q.type === 'essay') {
         return userAns ? String(userAns).replace(/\n/g, ' ') : '-';
       }
       const evalRes = evaluateAnswer(q, userAns);
-      if (evalRes.isCorrect) correctCount++;
-      else wrongCount++;
+      if (evalRes.isCorrect) {
+        correctCount++;
+        earnedPgWeight += qWeight;
+      } else {
+        wrongCount++;
+      }
       return evalRes.text || '-';
     });
+
+    const finalPg = earnedPgWeight > 0 ? earnedPgWeight : (Number(sub.pg_score) || 0);
+    const finalEssay = Number(sub.essay_score) || 0;
+    const finalTotal = finalPg + finalEssay;
 
     return [
       idx + 1,
       part?.identifier || part?.username || '-',
       part?.full_name || part?.username || 'Peserta',
-      part?.kelas || '-',
-      part?.paket || '-',
+      cleanKelas,
+      cleanPaket,
       ...answerCols,
       correctCount,
       wrongCount,
-      Number(sub.pg_score) || 0,
-      Number(sub.essay_score) || 0,
-      Number(sub.total_score) || 0
+      finalPg,
+      finalEssay,
+      finalTotal
     ];
   });
 
@@ -558,7 +576,15 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
   ];
 
   const detailRows = submissions.map((sub, idx) => {
-    const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+    const part = participants.find(p => 
+      (p.username && (String(p.username).toLowerCase() === String(sub.participant_id).toLowerCase() || String(p.username).toLowerCase() === String(sub.username || '').toLowerCase())) ||
+      (p.identifier && String(p.identifier).toLowerCase() === String(sub.participant_id).toLowerCase()) ||
+      (p.participant_id && String(p.participant_id).toLowerCase() === String(sub.participant_id).toLowerCase())
+    ) || participants.find(p => p.participant_id === sub.participant_id);
+
+    let cleanPaket = part?.paket || 'Pretest';
+    if (/^\d{4}-\d{2}-\d{2}T/.test(cleanPaket) || cleanPaket === '-') cleanPaket = 'Pretest';
+    const cleanKelas = (part?.kelas && part.kelas !== '-') ? part.kelas : 'PAI';
 
     let parsedAnswers = {};
     try {
@@ -567,8 +593,10 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
 
     let correctCount = 0;
     let wrongCount = 0;
+    let earnedPgWeight = 0;
 
     const questionResults = relevantQuestions.map(q => {
+      const qWeight = Number(q.weight) || 1;
       const userAns = parsedAnswers[q.question_id];
       if (q.type === 'essay') {
         return userAns ? `"${String(userAns).replace(/\n/g, ' ')}"` : '(Tidak dijawab)';
@@ -576,6 +604,7 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
       const evalRes = evaluateAnswer(q, userAns);
       if (evalRes.isCorrect) {
         correctCount++;
+        earnedPgWeight += qWeight;
         return `${evalRes.text} [BENAR]`;
       } else {
         wrongCount++;
@@ -583,13 +612,17 @@ export const exportDetailedResultsToExcel = (submissions, questions, participant
       }
     });
 
+    const finalPg = earnedPgWeight > 0 ? earnedPgWeight : (Number(sub.pg_score) || 0);
+    const finalEssay = Number(sub.essay_score) || 0;
+    const finalTotal = finalPg + finalEssay;
+
     return [
       idx + 1,
       part?.identifier || part?.username || '-',
       part?.full_name || part?.username || 'Peserta',
-      part?.kelas || '-',
-      part?.paket || '-',
-      Number(sub.total_score) || 0,
+      cleanKelas,
+      cleanPaket,
+      finalTotal,
       correctCount,
       wrongCount,
       ...questionResults

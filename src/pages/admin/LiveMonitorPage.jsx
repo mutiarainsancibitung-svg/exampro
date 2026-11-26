@@ -498,7 +498,12 @@ export const LiveMonitorPage = () => {
               const hasViolations = Number(p.violations) > 0;
               const isFinished = p.status === 'submitted';
               const isWorking = p.status === 'in_progress';
-              const progressPct = p.total_questions > 0 ? Math.round((p.answered_count / p.total_questions) * 100) : 0;
+              const answeredCount = isFinished
+                ? (p.answered_count > 0 ? p.answered_count : (p.total_questions || 25))
+                : (p.answered_count || 0);
+              const progressPct = p.total_questions > 0
+                ? Math.round((answeredCount / p.total_questions) * 100)
+                : (isFinished ? 100 : 0);
 
               return (
                 <Card
@@ -581,7 +586,7 @@ export const LiveMonitorPage = () => {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 font-medium">Progres Jawaban:</span>
                       <strong className="text-slate-800 font-mono">
-                        {p.answered_count} / {p.total_questions} Soal ({progressPct}%)
+                        {answeredCount} / {p.total_questions || 25} Soal ({progressPct}%)
                       </strong>
                     </div>
                     <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
@@ -650,7 +655,12 @@ export const LiveMonitorPage = () => {
                     const hasViolations = Number(p.violations) > 0;
                     const isFinished = p.status === 'submitted';
                     const isWorking = p.status === 'in_progress';
-                    const progressPct = p.total_questions > 0 ? Math.round((p.answered_count / p.total_questions) * 100) : 0;
+                    const answeredCount = isFinished
+                      ? (p.answered_count > 0 ? p.answered_count : (p.total_questions || 25))
+                      : (p.answered_count || 0);
+                    const progressPct = p.total_questions > 0
+                      ? Math.round((answeredCount / p.total_questions) * 100)
+                      : (isFinished ? 100 : 0);
 
                     return (
                       <tr key={p.participant_id} className={`hover:bg-slate-50/80 transition ${hasViolations ? 'bg-rose-50/30' : ''}`}>
@@ -678,7 +688,7 @@ export const LiveMonitorPage = () => {
                           )}
                         </td>
                         <td className="p-3.5">
-                          <div className="font-mono font-bold text-slate-800">{p.answered_count} / {p.total_questions} ({progressPct}%)</div>
+                          <div className="font-mono font-bold text-slate-800">{answeredCount} / {p.total_questions || 25} ({progressPct}%)</div>
                           <div className="w-24 bg-slate-100 h-1.5 rounded-full mt-1 overflow-hidden">
                             <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${progressPct}%` }} />
                           </div>

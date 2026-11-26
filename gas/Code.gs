@@ -827,9 +827,10 @@ function handleSubmitExam(payload) {
     }
   });
 
-  const pgScoreCalculated = totalPgMaxScore > 0 ? Math.round((earnedPgScore / totalPgMaxScore) * 100) : 0;
+  // Rumus Skor: Benar * Bobot (misal 5 benar * bobot 2 = 10 poin)
+  const pgScoreCalculated = earnedPgScore;
   const initialEssayScore = 0;
-  const totalScore = pgScoreCalculated;
+  const totalScore = pgScoreCalculated + initialEssayScore;
 
   const submissionId = 'SUB-' + new Date().getTime();
   const submittedAt = new Date().toISOString();
@@ -1903,8 +1904,9 @@ function recalculateZeroSubmissions(ss) {
           }
         });
 
-        if (maxPg > 0) {
-          const newScore = Math.round((earned / maxPg) * 100);
+        if (earned > 0) {
+          // Rumus Nilai: Jumlah Benar * Bobot (misal 5 benar * bobot 2 = 10 poin)
+          const newScore = earned;
           subSheet.getRange(i + 1, pgCol + 1).setValue(newScore);
           subSheet.getRange(i + 1, totalCol + 1).setValue(newScore);
           recalculatedCount++;
@@ -1970,23 +1972,31 @@ function handleGetLiveProctor(payload) {
   });
   const targetParts = Object.values(uniquePartsMap);
 
-  const targetSubs = submissions.filter(s => String(s.session_id) === String(targetSessionId));
-  const subMap = {};
-  targetSubs.forEach(function(s) {
-    if (s.participant_id) subMap[String(s.participant_id).trim()] = s;
-  });
-
   const nowEpoch = new Date().getTime();
 
   const liveList = targetParts.map(function(p) {
     const pId = String(p.participant_id || '').trim();
     const pUser = String(p.username || '').trim().toLowerCase();
     const pIdent = String(p.identifier || '').trim().toLowerCase();
+    const pName = String(p.full_name || '').trim().toLowerCase();
 
     const live = proctorData[pId] || proctorData[pUser] || {};
-    const sub = subMap[pId] || subMap[pUser] || targetSubs.find(function(s) {
+
+    // Pencarian submisi yang fleksibel dan menyeluruh
+    let sub = submissions.find(function(s) {
       const sId = String(s.participant_id || '').trim().toLowerCase();
-      return sId === pId.toLowerCase() || sId === pUser || (pIdent && sId === pIdent);
+      if (!sId) return false;
+      if (sId === pId.toLowerCase() || sId === pUser || (pIdent && sId === pIdent)) return true;
+      // Periksa apakah ID pada submission merujuk ke username atau nama peserta ini
+      const matchedOtherPart = participants.find(function(op) {
+        return String(op.participant_id || '').trim().toLowerCase() === sId;
+      });
+      if (matchedOtherPart) {
+        const opUser = String(matchedOtherPart.username || '').trim().toLowerCase();
+        const opName = String(matchedOtherPart.full_name || '').trim().toLowerCase();
+        if (opUser === pUser || (pName && opName === pName)) return true;
+      }
+      return false;
     });
 
     const isSubmitted = !!sub || String(p.status).toLowerCase() === 'submitted';
@@ -2005,18 +2015,17 @@ function handleGetLiveProctor(payload) {
     let calculatedScore = null;
     if (sub) {
       calculatedScore = Number(sub.total_score) || Number(sub.pg_score) || 0;
-      // Jika skor submission masih 0 tapi ada lembar jawaban, hitung skor dinamis secara instan
-      if (calculatedScore === 0 && sub.answers_json) {
+      // Evaluasi langsung dari lembar jawaban: Benar * Bobot Soal
+      if (sub.answers_json) {
         let pAns = {};
         try { pAns = typeof sub.answers_json === 'string' ? JSON.parse(sub.answers_json) : sub.answers_json; } catch(e) {}
         const pKeys = Object.keys(pAns);
         if (pKeys.length > 0 && allQuestions && allQuestions.length > 0) {
-          let earned = 0, maxScore = 0;
+          let earned = 0;
           pKeys.forEach(function(qid) {
             const q = allQuestions.find(function(item) { return String(item.question_id) === String(qid); });
             if (q && (q.type === 'single_choice' || q.type === 'multiple_choice')) {
               const w = Number(q.weight) || 1;
-              maxScore += w;
               const uAns = pAns[qid];
               if (q.type === 'single_choice') {
                 if (uAns && String(uAns).trim().toUpperCase() === String(q.key_answer).trim().toUpperCase()) earned += w;
@@ -2027,10 +2036,16 @@ function handleGetLiveProctor(payload) {
               }
             }
           });
-          if (maxScore > 0) calculatedScore = Math.round((earned / maxScore) * 100);
+          if (earned > 0) calculatedScore = earned;
         }
       }
     }
+
+    const finalAnsweredCount = isSubmitted
+      ? (sub && sub.answers_json ? Object.keys(JSON.parse(sub.answers_json || '{}')).length || 25 : 25)
+      : (live.answeredCount || 0);
+
+    const finalViolations = Number(sub ? (sub.tab_switch_count !== undefined ? sub.tab_switch_count : sub.violations) : (live.violations || 0)) || 0;
 
     return {
       participant_id: pId,
@@ -2044,9 +2059,9 @@ function handleGetLiveProctor(payload) {
       start_time: p.start_time,
       status: status,
       is_online: isOnline,
-      answered_count: live.answeredCount || (sub ? Object.keys(JSON.parse(sub.answers_json || '{}')).length : 0),
+      answered_count: finalAnsweredCount,
       total_questions: live.totalQuestions || 25,
-      violations: Number(sub ? sub.tab_switch_count : (live.violations || 0)),
+      violations: finalViolations,
       last_violation_msg: live.lastViolationMsg || '',
       last_heartbeat: live.lastHeartbeat || null,
       score: calculatedScore
