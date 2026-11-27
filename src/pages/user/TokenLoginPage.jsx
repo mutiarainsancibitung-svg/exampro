@@ -97,9 +97,13 @@ export const TokenLoginPage = () => {
       if (res.status === 'success' && res.participant) {
         const p = res.participant;
         setConfirmFullName(p.full_name || username);
-        setGender(p.gender || 'Laki-Laki');
+        setGender(p.gender === 'Perempuan' ? 'Perempuan' : 'Laki-Laki');
         setUserKelas(p.kelas || 'Kelas A');
-        setUserPaket(p.paket || 'Pretest');
+        setUserPaket(p.paket && p.paket !== '-' ? p.paket : (res.activeSession?.type || 'Pretest'));
+        if (res.activeSession) {
+          setActiveSession(res.activeSession);
+          setRotatingToken(getMinuteRotatingToken(res.activeSession.session_id || 'PAI_TOT'));
+        }
         setStage(2);
       }
     } catch (err) {
@@ -384,9 +388,17 @@ export const TokenLoginPage = () => {
                   {/* Mata Ujian */}
                   <div className="border-b border-slate-100 pb-2">
                     <label className="block text-[11px] font-semibold text-slate-500 uppercase">Mata Ujian</label>
-                    <span className="text-sm font-bold text-kemenag-700">
-                      Pelatihan Guru PAI ({userPaket})
+                    <span className="text-sm font-bold text-kemenag-700 block">
+                      {activeSession?.title || `Pelatihan Guru PAI (${userPaket})`}
                     </span>
+                    {(activeSession?.start_at || activeSession?.end_at) && (
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        Jadwal:{' '}
+                        {activeSession.start_at ? new Date(activeSession.start_at).toLocaleString('id-ID') : 'Sekarang'}
+                        {' — '}
+                        {activeSession.end_at ? new Date(activeSession.end_at).toLocaleString('id-ID') : 'Selesai'}
+                      </span>
+                    )}
                   </div>
 
                   {/* Input Konfirmasi: Nama Peserta */}

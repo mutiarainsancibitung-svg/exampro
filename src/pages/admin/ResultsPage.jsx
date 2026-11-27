@@ -387,6 +387,212 @@ export const ResultsPage = () => {
     printWindow.document.close();
   };
 
+  // Cetak / Unduh PDF LENGKAP Semua Peserta yang Sudah Mengerjakan
+  const handlePrintPdfAll = () => {
+    if (filteredSubmissions.length === 0) {
+      alert('Belum ada peserta yang mengumpulkan ujian untuk dicetak.');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Pop-up terblokir oleh browser. Harap izinkan pop-up untuk mengunduh PDF lengkap.');
+      return;
+    }
+
+    const sessionObj = sessions.find(s => s.session_id === selectedSession);
+    const sessionTitle = sessionObj?.title || 'Semua Sesi Evaluasi Pelatihan Guru PAI';
+    const avgScore = filteredSubmissions.length > 0
+      ? (filteredSubmissions.reduce((acc, s) => acc + (Number(s.total_score) || 0), 0) / filteredSubmissions.length).toFixed(1)
+      : 0;
+    const maxScore = filteredSubmissions.length > 0
+      ? Math.max(...filteredSubmissions.map(s => Number(s.total_score) || 0))
+      : 0;
+
+    // Halaman 1: Tabel Rekapitulasi Nilai Semua Peserta
+    const summaryRowsHtml = filteredSubmissions.map((sub, idx) => `
+      <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
+        <td style="padding: 6px 4px; text-align: center; font-weight: bold;">${idx + 1}</td>
+        <td style="padding: 6px 8px;">
+          <div style="font-weight: bold; color: #0f172a;">${sub.participantName}</div>
+          <div style="font-size: 10px; color: #64748b;">NIP/ID: ${sub.participantIdentifier}</div>
+        </td>
+        <td style="padding: 6px 6px; text-align: center;">${sub.participantKelas}</td>
+        <td style="padding: 6px 6px; text-align: center;">${sub.participantPaket}</td>
+        <td style="padding: 6px 6px; text-align: center; font-weight: bold; color: #15803d;">${sub.correctCount}</td>
+        <td style="padding: 6px 6px; text-align: center; font-weight: bold; color: #b91c1c;">${sub.wrongCount}</td>
+        <td style="padding: 6px 6px; text-align: center; font-weight: bold; color: #0f766e;">${sub.pg_score}</td>
+        <td style="padding: 6px 6px; text-align: center; font-weight: bold; color: #7e22ce;">${sub.essay_score || 0}</td>
+        <td style="padding: 6px 6px; text-align: center; font-weight: 900; color: #065f46; background: #ecfdf5;">${sub.total_score}</td>
+        <td style="padding: 6px 6px; text-align: center;">${Number(sub.tab_switch_count) > 0 ? `${sub.tab_switch_count}x` : 'Tertib'}</td>
+      </tr>
+    `).join('');
+
+    // Halaman Selanjutnya: Lembar Rincian Butir Soal Per Peserta
+    const perParticipantPagesHtml = filteredSubmissions.map((sub) => {
+      const parsedAnswers = sub.parsedAnswers || {};
+      let sessQuestions = questions.filter(q => q.session_id === sub.session_id);
+      if (sessQuestions.length === 0 && Object.keys(parsedAnswers).length > 0) {
+        sessQuestions = questions.filter(q => Object.keys(parsedAnswers).includes(q.question_id));
+      }
+      if (sessQuestions.length === 0) sessQuestions = questions;
+
+      const qRows = sessQuestions.map((q, qIdx) => {
+        const evalRes = evaluateQuestion(q, parsedAnswers[q.question_id]);
+        let badge = '';
+        if (evalRes.isEssay) {
+          badge = `<span style="background:#f3e8ff;color:#6b21a8;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:10px;">Essay (${sub.essay_score || 0})</span>`;
+        } else if (evalRes.isCorrect) {
+          badge = `<span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:10px;">&#10003; BETUL</span>`;
+        } else if (evalRes.isBlank) {
+          badge = `<span style="background:#f1f5f9;color:#64748b;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:10px;">KOSONG</span>`;
+        } else {
+          badge = `<span style="background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:10px;">&#10007; SALAH</span>`;
+        }
+
+        const uText = evalRes.isEssay ? `<em>${evalRes.userText || '(Kosong)'}</em>` : `<strong>${evalRes.userText || '(Kosong)'}</strong>`;
+        const kText = evalRes.isEssay ? `<small>${q.key_answer || '-'}</small>` : `<strong>${evalRes.key || '-'}</strong>`;
+
+        return `
+          <tr style="border-bottom: 1px solid #e2e8f0; font-size: 10px; page-break-inside: avoid;">
+            <td style="padding: 5px 4px; text-align: center; font-weight: bold;">${qIdx + 1}</td>
+            <td style="padding: 5px 6px;">${q.question_text || ''}</td>
+            <td style="padding: 5px 6px; text-align: center;">${uText}</td>
+            <td style="padding: 5px 6px; text-align: center; color: #047857;">${kText}</td>
+            <td style="padding: 5px 6px; text-align: center;">${badge}</td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <div class="participant-section">
+          <div style="border-bottom: 2px solid #0d7a5f; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-size: 13px; font-weight: 800; color: #0f172a;">${sub.participantName}</div>
+              <div style="font-size: 10px; color: #475569;">NIP/ID: ${sub.participantIdentifier} • Kelas: ${sub.participantKelas} • Paket: ${sub.participantPaket}</div>
+            </div>
+            <div style="text-align: right; font-size: 11px;">
+              <div>Total Nilai: <strong style="color:#047857; font-size: 14px;">${sub.total_score}</strong> (PG: ${sub.pg_score} | Essay: ${sub.essay_score || 0})</div>
+              <div style="font-size: 10px; color: #64748b;">Benar: ${sub.correctCount} • Salah: ${sub.wrongCount} • Pelanggaran: ${sub.tab_switch_count || 0}x</div>
+            </div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 30px;">No</th>
+                <th style="text-align: left;">Butir Pertanyaan</th>
+                <th style="width: 75px;">Jawaban</th>
+                <th style="width: 65px;">Kunci</th>
+                <th style="width: 90px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>${qRows}</tbody>
+          </table>
+        </div>
+      `;
+    }).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Rekap PDF Lengkap - ${sessionTitle}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; margin: 0; padding: 12px; line-height: 1.35; }
+          .kop-table { width: 100%; border-collapse: collapse; border-bottom: 3px double #0d7a5f; padding-bottom: 8px; margin-bottom: 12px; }
+          .kop-logo { width: 56px; height: 56px; object-fit: contain; }
+          .kop-text { text-align: center; }
+          .kop-text h2 { margin: 0; font-size: 13px; text-transform: uppercase; color: #0f172a; }
+          .kop-text h1 { margin: 2px 0; font-size: 15px; text-transform: uppercase; color: #0d7a5f; }
+          .kop-text p { margin: 0; font-size: 10px; color: #475569; }
+          .doc-title { text-align: center; font-size: 13px; font-weight: bold; text-decoration: underline; margin: 10px 0 4px; text-transform: uppercase; }
+          .sub-title { text-align: center; font-size: 11px; color: #475569; margin-bottom: 12px; }
+          .stats-row { display: table; width: 100%; margin-bottom: 12px; }
+          .stats-cell { display: table-cell; width: 25%; padding: 3px; }
+          .metric-box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px; background: #f8fafc; text-align: center; }
+          .metric-box .label { font-size: 9px; text-transform: uppercase; font-weight: bold; color: #64748b; }
+          .metric-box .val { font-size: 15px; font-weight: 900; color: #0f172a; }
+          .data-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+          .data-table th { background: #f1f5f9; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; padding: 6px 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; }
+          .participant-section { page-break-before: always; padding-top: 4px; }
+        </style>
+      </head>
+      <body>
+        <table class="kop-table">
+          <tr>
+            <td style="width: 65px; text-align: center;"><img src="${window.location.origin}/Logo_Kemenag.png" class="kop-logo" onerror="this.style.display='none'" /></td>
+            <td class="kop-text">
+              <h2>Kementerian Agama Republik Indonesia</h2>
+              <h1>Fakultas Ilmu Tarbiyah dan Keguruan UIN Jakarta</h1>
+              <p>Program Pelatihan & Asesmen Guru PAI Modern Berbasis CBT Online</p>
+            </td>
+            <td style="width: 65px; text-align: center;"><img src="${window.location.origin}/Logo_UIN.png" class="kop-logo" onerror="this.style.display='none'" /></td>
+          </tr>
+        </table>
+
+        <div class="doc-title">Laporan Rekapitulasi Lengkap Hasil Ujian Peserta CBT</div>
+        <div class="sub-title">${sessionTitle} • Dicetak pada ${new Date().toLocaleString('id-ID')}</div>
+
+        <div class="stats-row">
+          <div class="stats-cell"><div class="metric-box"><div class="label">Total Peserta</div><div class="val">${filteredSubmissions.length}</div></div></div>
+          <div class="stats-cell"><div class="metric-box" style="background:#ecfdf5;"><div class="label" style="color:#065f46;">Rata-rata Nilai</div><div class="val" style="color:#047857;">${avgScore}</div></div></div>
+          <div class="stats-cell"><div class="metric-box"><div class="label">Nilai Tertinggi</div><div class="val" style="color:#0f766e;">${maxScore}</div></div></div>
+          <div class="stats-cell"><div class="metric-box"><div class="label">Kelas Filter</div><div class="val" style="font-size:12px;">${selectedKelas === 'ALL' ? 'Semua Kelas' : selectedKelas}</div></div></div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 28px;">No</th>
+              <th style="text-align: left;">Nama Peserta & NIP</th>
+              <th style="width: 70px;">Kelas</th>
+              <th style="width: 65px;">Paket</th>
+              <th style="width: 45px;">Benar</th>
+              <th style="width: 45px;">Salah</th>
+              <th style="width: 55px;">Skor PG</th>
+              <th style="width: 55px;">Essay</th>
+              <th style="width: 60px;">Total</th>
+              <th style="width: 65px;">Pelanggaran</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summaryRowsHtml}
+          </tbody>
+        </table>
+
+        <table style="width: 100%; margin-top: 24px; font-size: 11px;">
+          <tr>
+            <td style="width: 60%;"></td>
+            <td style="width: 40%; text-align: center;">
+              <div>Jakarta, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+              <div style="margin-top: 3px; font-weight: bold;">Panitia Ujian & Pengawas CBT,</div>
+              <div style="height: 45px;"></div>
+              <div style="font-weight: bold; text-decoration: underline;">Panitia Pelatihan PAI</div>
+              <div style="font-size: 10px; color: #64748b;">FITK UIN Syarif Hidayatullah Jakarta</div>
+            </td>
+          </tr>
+        </table>
+
+        ${perParticipantPagesHtml}
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 400);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   // Ekstrak Kelas & Paket Dinamis
   const dynamicClasses = Array.from(new Set(participants.map(p => p.kelas?.trim()).filter(Boolean)));
   const dynamicPackages = Array.from(new Set([
@@ -598,6 +804,18 @@ export const ResultsPage = () => {
               className="border-slate-200 text-slate-700 hover:bg-slate-50"
             >
               Segarkan
+            </Button>
+
+            {/* Tombol Unduh PDF Lengkap Semua Peserta */}
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Printer}
+              onClick={handlePrintPdfAll}
+              title="Cetak atau simpan PDF rekap & rincian lembar jawaban seluruh peserta yang sudah mengerjakan"
+              className="font-bold"
+            >
+              Unduh PDF Lengkap (.pdf)
             </Button>
 
             {/* Tombol Ekspor Rekap Lengkap & Analisis Jawaban (.xlsx) Sesuai Template */}

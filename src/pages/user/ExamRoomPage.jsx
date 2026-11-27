@@ -12,7 +12,14 @@ import { ViolationModal } from '../../components/exam/ViolationModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type } from 'lucide-react';
+
+const FONT_SIZE_PRESETS = {
+  sm: { key: 'sm', label: 'A-', title: 'Ukuran Huruf Kecil', cls: 'text-sm leading-relaxed' },
+  base: { key: 'base', label: 'A', title: 'Ukuran Huruf Standar', cls: 'text-base leading-relaxed' },
+  lg: { key: 'lg', label: 'A+', title: 'Ukuran Huruf Besar', cls: 'text-lg leading-relaxed' },
+  xl: { key: 'xl', label: 'A++', title: 'Ukuran Huruf Ekstra Besar', cls: 'text-xl leading-relaxed' }
+};
 
 export const ExamRoomPage = () => {
   const navigate = useNavigate();
@@ -34,20 +41,37 @@ export const ExamRoomPage = () => {
     registerViolation,
     proctorMessage,
     clearProctorMessage,
+    sessionTerminatedReason,
+    clearSessionTerminatedReason,
     loadQuestions,
     submitExam
   } = useExam();
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [fontSize, setFontSize] = useState(() => {
+    const saved = localStorage.getItem('exampro_font_size');
+    return FONT_SIZE_PRESETS[saved] ? saved : 'base';
+  });
 
-  // Proteksi rute
+  const handleChangeFontSize = (sizeKey) => {
+    setFontSize(sizeKey);
+    localStorage.setItem('exampro_font_size', sizeKey);
+  };
+
+  // Proteksi rute & auto-exit jika sesi dinonaktifkan pengawas
   useEffect(() => {
+    if (sessionTerminatedReason) {
+      alert(sessionTerminatedReason);
+      clearSessionTerminatedReason();
+      navigate('/');
+      return;
+    }
     if (!isParticipantLoggedIn) {
       navigate('/');
     } else {
       loadQuestions();
     }
-  }, [isParticipantLoggedIn, navigate, loadQuestions]);
+  }, [isParticipantLoggedIn, sessionTerminatedReason, clearSessionTerminatedReason, navigate, loadQuestions]);
 
   // Hook Anti-Cheat
   const {
@@ -61,7 +85,7 @@ export const ExamRoomPage = () => {
     isExamActive: isParticipantLoggedIn && !submitting
   });
 
-  // Handler Waktu Habis
+  // Handler Waktu Habis: langsung simpan otomatis semua jawaban
   const handleTimeUp = async () => {
     try {
       await submitExam();
@@ -72,10 +96,11 @@ export const ExamRoomPage = () => {
     }
   };
 
-  // Timer Sinkron Server
+  // Timer Sinkron Server + Batas Akhir Jadwal Sesi
   const timer = useServerTimer({
     startTime: participant?.startTime,
     durationMinutes: sessionData?.duration_minutes || 60,
+    endAt: sessionData?.end_at,
     onTimeUp: handleTimeUp,
     isActive: isParticipantLoggedIn && !submitting
   });
@@ -132,7 +157,33 @@ export const ExamRoomPage = () => {
             </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {/* Pengatur Variasi Ukuran Font Soal & Pilihan Jawaban */}
+            <div
+              className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl p-1"
+              title="Sesuaikan ukuran teks soal & pilihan jawaban"
+            >
+              <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 px-1.5">
+                <Type className="w-3.5 h-3.5 text-kemenag-600" />
+                Font:
+              </span>
+              {Object.values(FONT_SIZE_PRESETS).map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => handleChangeFontSize(preset.key)}
+                  title={preset.title}
+                  className={`px-2 py-1 rounded-xl text-[11px] font-bold transition ${
+                    fontSize === preset.key
+                      ? 'bg-kemenag-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-white hover:text-kemenag-700'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
             <button
               onClick={requestFullscreen}
               title="Masuk Mode Layar Penuh"
@@ -163,6 +214,7 @@ export const ExamRoomPage = () => {
               onAnswerChange={(val) => setAnswer(currentQuestion.question_id, val)}
               isFlagged={Boolean(flagged[currentQuestion.question_id])}
               onToggleFlag={() => toggleFlag(currentQuestion.question_id)}
+              fontSizeClass={FONT_SIZE_PRESETS[fontSize]?.cls || 'text-base leading-relaxed'}
             />
 
             {/* Navigasi Bawah Soal */}

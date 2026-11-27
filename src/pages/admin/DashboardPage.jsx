@@ -27,8 +27,24 @@ export const DashboardPage = () => {
     is_active: true,
     shuffle_questions: true,
     shuffle_options: true,
-    show_score: true
+    show_score: true,
+    start_at: '',
+    end_at: ''
   });
+
+  const formatIndoDateTime = (val) => {
+    if (!val) return '';
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('id-ID', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   useEffect(() => {
     if (!isAdminLoggedIn) {
@@ -54,8 +70,18 @@ export const DashboardPage = () => {
 
   const handleSaveSession = async (e) => {
     e.preventDefault();
+    if (sessionForm.start_at && sessionForm.end_at) {
+      if (new Date(sessionForm.end_at).getTime() <= new Date(sessionForm.start_at).getTime()) {
+        alert('Waktu selesai harus lebih akhir daripada waktu mulai!');
+        return;
+      }
+    }
     try {
-      await gasApi.saveSession(adminSecretKey, sessionForm);
+      await gasApi.saveSession(adminSecretKey, {
+        ...sessionForm,
+        start_at: sessionForm.start_at ? new Date(sessionForm.start_at).toISOString() : '',
+        end_at: sessionForm.end_at ? new Date(sessionForm.end_at).toISOString() : ''
+      });
       setShowSessionModal(false);
       setSessionForm({
         title: '',
@@ -65,21 +91,31 @@ export const DashboardPage = () => {
         is_active: true,
         shuffle_questions: true,
         shuffle_options: true,
-        show_score: true
+        show_score: true,
+        start_at: '',
+        end_at: ''
       });
-      loadDashboard();
+      loadDashboard(true);
     } catch (err) {
       alert('Gagal menyimpan sesi: ' + err.message);
     }
   };
 
   const handleToggleSession = async (sess) => {
+    const nextActive = !sess.is_active;
+    if (!nextActive) {
+      const ok = window.confirm(
+        `Nonaktifkan sesi "${sess.title}"?\n\n` +
+        `Peserta aktif akan otomatis dikeluarkan, login baru diblokir, dan plotting pada Data Peserta dikembalikan ke kondisi awal (riwayat nilai tetap aman).`
+      );
+      if (!ok) return;
+    }
     try {
       await gasApi.saveSession(adminSecretKey, {
         ...sess,
-        is_active: !sess.is_active
+        is_active: nextActive
       });
-      loadDashboard();
+      loadDashboard(true);
     } catch (err) {
       alert('Gagal mengubah status sesi: ' + err.message);
     }
@@ -223,6 +259,12 @@ export const DashboardPage = () => {
                     <span>•</span>
                     <span>Token: <strong className="font-mono text-kemenag-800 bg-kemenag-50 border border-kemenag-200 px-2 py-0.5 rounded-lg">{sess.token}</strong></span>
                   </div>
+                  {(sess.start_at || sess.end_at) && (
+                    <div className="mt-2 text-[11px] text-blue-800 bg-blue-50/70 border border-blue-200 rounded-xl px-2.5 py-1.5 space-y-0.5">
+                      {sess.start_at && <div>Mulai: <strong>{formatIndoDateTime(sess.start_at)}</strong></div>}
+                      {sess.end_at && <div>Akhir: <strong>{formatIndoDateTime(sess.end_at)}</strong></div>}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
@@ -288,6 +330,27 @@ export const DashboardPage = () => {
               className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono font-bold uppercase"
               required
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">Jadwal Mulai (Opsional)</label>
+              <input
+                type="datetime-local"
+                value={sessionForm.start_at}
+                onChange={(e) => setSessionForm({ ...sessionForm, start_at: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">Jadwal Akhir (Opsional)</label>
+              <input
+                type="datetime-local"
+                value={sessionForm.end_at}
+                onChange={(e) => setSessionForm({ ...sessionForm, end_at: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              />
+            </div>
           </div>
 
           <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">

@@ -1,46 +1,74 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
- * Hook Timer yang terhubung dengan timestamp mulai (start_time)
- * Menjamin durasi tidak di-reset hanya dengan me-refresh browser.
+ * Hook Timer yang terhubung dengan timestamp mulai (start_time) dan batas akhir sesi (endAt)
+ * Menjamin durasi tidak di-reset saat refresh, tidak drift, dan langsung memicu submit saat 0.
  */
-export const useServerTimer = ({ startTime, durationMinutes, onTimeUp, isActive = true }) => {
+export const useServerTimer = ({ startTime, durationMinutes, endAt, onTimeUp, isActive = true }) => {
   const calculateRemainingSeconds = useCallback(() => {
-    if (!startTime || !durationMinutes) return 0;
+    if (!startTime || !durationMinutes) return null;
     const startMs = new Date(startTime).getTime();
-    const durationMs = durationMinutes * 60 * 1000;
-    const endMs = startMs + durationMs;
-    const nowMs = Date.now();
-    const remainingMs = endMs - nowMs;
-    return Math.max(0, Math.floor(remainingMs / 1000));
-  }, [startTime, durationMinutes]);
+    if (isNaN(startMs)) return null;
 
-  const [secondsLeft, setSecondsLeft] = useState(calculateRemainingSeconds);
+    let effectiveEndMs = startMs + Number(durationMinutes) * 60 * 1000;
+    if (endAt) {
+      const scheduleEndMs = new Date(endAt).getTime();
+      if (!isNaN(scheduleEndMs)) {
+        effectiveEndMs = Math.min(effectiveEndMs, scheduleEndMs);
+      }
+    }
+
+    const remainingMs = effectiveEndMs - Date.now();
+    return Math.max(0, Math.floor(remainingMs / 1000));
+  }, [startTime, durationMinutes, endAt]);
+
+  const [secondsLeft, setSecondsLeft] = useState(() => {
+    const initial = calculateRemainingSeconds();
+    return initial !== null ? initial : 0;
+  });
   const onTimeUpRef = useRef(onTimeUp);
   onTimeUpRef.current = onTimeUp;
+  const hasTriggeredRef = useRef(false);
 
   useEffect(() => {
-    setSecondsLeft(calculateRemainingSeconds());
+    hasTriggeredRef.current = false;
+    const rem = calculateRemainingSeconds();
+    if (rem !== null) {
+      setSecondsLeft(rem);
+    }
   }, [calculateRemainingSeconds]);
 
   useEffect(() => {
-    if (!isActive || secondsLeft <= 0) return;
+    if (!isActive) return;
+
+    const initialRem = calculateRemainingSeconds();
+    if (initialRem === null) return;
+
+    if (initialRem <= 0) {
+      setSecondsLeft(0);
+      if (!hasTriggeredRef.current && onTimeUpRef.current) {
+        hasTriggeredRef.current = true;
+        onTimeUpRef.current();
+      }
+      return;
+    }
 
     const interval = setInterval(() => {
-      setSecondsLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          if (onTimeUpRef.current) {
-            onTimeUpRef.current();
-          }
-          return 0;
+      const currentRem = calculateRemainingSeconds();
+      if (currentRem === null) return;
+
+      setSecondsLeft(currentRem);
+      if (currentRem <= 0) {
+        clearInterval(interval);
+        if (!hasTriggeredRef.current && onTimeUpRef.current) {
+          hasTriggeredRef.current = true;
+          onTimeUpRef.current();
         }
-        return prev - 1;
-      });
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isActive, secondsLeft]);
+  }, [isActive, calculateRemainingSeconds]);
 
   // Format detik menjadi format HH:MM:SS atau MM:SS
   const formatTime = () => {

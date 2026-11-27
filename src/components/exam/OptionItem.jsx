@@ -6,6 +6,7 @@ export const OptionItem = ({
   displayLabel,
   type = 'single_choice',
   isSelected = false,
+  fontSizeClass = 'text-base leading-relaxed',
   onSelect
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
@@ -47,7 +48,7 @@ export const OptionItem = ({
 
       {/* Option Text & Optional Image */}
       <div className="flex-1 space-y-2">
-        <span className={`text-sm leading-relaxed block ${isSelected ? 'text-indigo-950 font-medium' : 'text-slate-700'}`}>
+        <span className={`${fontSizeClass} block ${isSelected ? 'text-indigo-950 font-medium' : 'text-slate-700'}`}>
           {option.text}
         </span>
 

@@ -81,6 +81,24 @@ function saveMockDb(db) {
   localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(db));
 }
 
+function checkMockSchedule(sess) {
+  if (!sess) return { ok: false, message: 'Sesi ujian tidak ditemukan' };
+  const nowMs = Date.now();
+  if (sess.start_at) {
+    const startMs = new Date(sess.start_at).getTime();
+    if (!isNaN(startMs) && nowMs < startMs) {
+      return { ok: false, message: `Ujian belum dibuka. Jadwal mulai: ${new Date(startMs).toLocaleString('id-ID')}` };
+    }
+  }
+  if (sess.end_at) {
+    const endMs = new Date(sess.end_at).getTime();
+    if (!isNaN(endMs) && nowMs > endMs) {
+      return { ok: false, message: `Rentang waktu ujian telah berakhir pada ${new Date(endMs).toLocaleString('id-ID')}` };
+    }
+  }
+  return { ok: true };
+}
+
 export const gasApi = {
   /**
    * Cek apakah API GAS sudah terhubung
@@ -109,6 +127,15 @@ export const gasApi = {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 400));
       const db = getMockDb();
+      const openSessions = (db.sessions || []).filter(s => s.is_active && checkMockSchedule(s).ok);
+      if (openSessions.length === 0) {
+        const activeOnly = (db.sessions || []).find(s => s.is_active);
+        if (activeOnly) {
+          throw new Error(checkMockSchedule(activeOnly).message);
+        }
+        throw new Error('Seluruh mata ujian sedang dinonaktifkan / ditutup oleh panitia. Anda tidak dapat login saat ini.');
+      }
+
       const userClean = String(username).trim().toLowerCase();
       const passClean = String(password).trim();
 
@@ -117,15 +144,33 @@ export const gasApi = {
              String(p.password || 'kemenag2026').trim() === passClean
       );
 
-      if (found) {
-        return {
-          status: 'success',
-          participant: found
-        };
+      if (!found) {
+        throw new Error('Username atau Password salah! Pastikan data akun Anda sudah dibuat oleh Admin.');
       }
 
-      // Jika belum terdaftar tetapi format akun mirip demo, izinkan atau lempar error
-      throw new Error('Username atau Password salah! Pastikan data akun Anda sudah dibuat oleh Admin.');
+      const targetSess = (found.session_id && openSessions.find(s => s.session_id === found.session_id)) || openSessions[0];
+      const hasSubmitted = (db.submissions || []).some(
+        s => s.session_id === targetSess.session_id &&
+             (String(s.participant_id).toLowerCase() === userClean || String(s.participant_id).toLowerCase() === String(found.participant_id || '').toLowerCase())
+      );
+
+      if (hasSubmitted || (found.status === 'submitted' && (!found.session_id || found.session_id === targetSess.session_id))) {
+        throw new Error('Anda sudah menyelesaikan dan mengumpulkan ujian pada sesi ini. Token & akses masuk telah dinonaktifkan.');
+      }
+
+      if (found.status === 'in_progress' && found.start_time) {
+        const startMs = new Date(found.start_time).getTime();
+        const durationMs = (Number(targetSess.duration_minutes) || 60) * 60000;
+        if (!isNaN(startMs) && Date.now() >= startMs + durationMs) {
+          throw new Error('Waktu pengerjaan ujian Anda telah habis! Anda tidak dapat masuk kembali menggunakan token yang sama.');
+        }
+      }
+
+      return {
+        status: 'success',
+        participant: found,
+        activeSession: targetSess
+      };
     }
 
     const response = await fetch(getGasApiUrl(), {
@@ -150,6 +195,8 @@ export const gasApi = {
       const sess = db.sessions.find(s => s.token.toUpperCase() === token.trim().toUpperCase());
       if (!sess) throw new Error('Token ujian tidak ditemukan dalam sistem');
       if (!sess.is_active) throw new Error('Sesi ujian ini sedang dinonaktifkan');
+      const sched = checkMockSchedule(sess);
+      if (!sched.ok) throw new Error(sched.message);
       return { status: 'success', session: sess };
     }
 
@@ -179,17 +226,46 @@ export const gasApi = {
       }
 
       if (!sess) throw new Error('Token ujian tidak valid atau sudah kadaluarsa (token berganti setiap 1 menit)');
-      if (!sess.is_active) throw new Error('Sesi ujian ini sedang dinonaktifkan');
+      if (!sess.is_active) throw new Error('Sesi ujian ini sedang dinonaktifkan oleh panitia');
+      const sched = checkMockSchedule(sess);
+      if (!sched.ok) throw new Error(sched.message);
 
       let existingPart = db.participants.find(
-        p => p.username === identifier || p.identifier === identifier
+        p => String(p.username || '').toLowerCase() === String(identifier).toLowerCase() || String(p.identifier || '').toLowerCase() === String(identifier).toLowerCase()
       );
       const participantId = existingPart?.participant_id || ('P-' + Date.now());
-      const startTime = new Date().toISOString();
+
+      const alreadySubmitted = (db.submissions || []).some(
+        s => s.session_id === sess.session_id &&
+             (String(s.participant_id).toLowerCase() === String(identifier).toLowerCase() || String(s.participant_id).toLowerCase() === String(participantId).toLowerCase())
+      );
+
+      if (alreadySubmitted || (existingPart?.status === 'submitted' && (!existingPart.session_id || existingPart.session_id === sess.session_id))) {
+        if (existingPart) existingPart.token_used = '';
+        saveMockDb(db);
+        throw new Error('Anda sudah menyelesaikan dan mengumpulkan ujian pada sesi ini. Token tidak dapat digunakan lagi.');
+      }
+
+      let startTime = new Date().toISOString();
+      if (existingPart?.status === 'in_progress' && existingPart?.start_time && (!existingPart.session_id || existingPart.session_id === sess.session_id)) {
+        const prevStartMs = new Date(existingPart.start_time).getTime();
+        const durationMs = (Number(sess.duration_minutes) || 60) * 60000;
+        if (!isNaN(prevStartMs)) {
+          if (Date.now() >= prevStartMs + durationMs) {
+            existingPart.status = 'submitted';
+            existingPart.token_used = '';
+            saveMockDb(db);
+            throw new Error('Waktu pengerjaan ujian Anda telah habis! Anda tidak dapat masuk kembali menggunakan token yang sama.');
+          }
+          startTime = existingPart.start_time;
+        }
+      }
+
       const finalPaket = paket || existingPart?.paket || 'Pretest';
       const finalKelas = kelas || existingPart?.kelas || 'Kelas A';
 
       if (existingPart) {
+        existingPart.session_id = sess.session_id;
         existingPart.token_used = token;
         existingPart.start_time = startTime;
         existingPart.status = 'in_progress';
@@ -202,7 +278,7 @@ export const gasApi = {
           username: identifier,
           full_name: fullName,
           identifier: identifier,
-          gender: gender || 'Laki-Laki',
+          gender: gender || '-',
           kelas: finalKelas,
           paket: finalPaket,
           token_used: token,
@@ -307,7 +383,7 @@ export const gasApi = {
         }
       });
 
-      const pgScore = totalPg > 0 ? Math.round((earnedPg / totalPg) * 100) : 0;
+      const pgScore = earnedPg;
       const submissionId = 'SUB-' + Date.now();
 
       db.submissions.push({
@@ -323,7 +399,10 @@ export const gasApi = {
       });
 
       const pIndex = db.participants.findIndex(p => p.participant_id === participantId || p.username === participantId || p.identifier === participantId);
-      if (pIndex !== -1) db.participants[pIndex].status = 'submitted';
+      if (pIndex !== -1) {
+        db.participants[pIndex].status = 'submitted';
+        db.participants[pIndex].token_used = '';
+      }
       if (db.liveProctor && db.liveProctor[participantId]) {
         db.liveProctor[participantId].status = 'submitted';
       }
@@ -356,11 +435,30 @@ export const gasApi = {
   /**
    * Kirim Heartbeat & Progres Ujian Real-Time dari Ruang Ujian Peserta
    */
-  async updateExamProgress({ participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg }) {
+  async updateExamProgress({ participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg, draftAnswers }) {
     if (!participantId || !sessionId) return { status: 'error' };
 
     if (!this.isConfigured()) {
       const db = getMockDb();
+      const sess = (db.sessions || []).find(s => s.session_id === sessionId);
+      if (!sess || !sess.is_active) {
+        return {
+          status: 'success',
+          sessionActive: false,
+          forcedLogout: true,
+          reason: 'Mata ujian telah dinonaktifkan oleh panitia. Anda otomatis dikeluarkan dari ruang ujian.'
+        };
+      }
+      const sched = checkMockSchedule(sess);
+      if (!sched.ok) {
+        return {
+          status: 'success',
+          sessionActive: false,
+          forcedLogout: true,
+          reason: sched.message
+        };
+      }
+
       db.liveProctor = db.liveProctor || {};
       const existing = db.liveProctor[participantId] || {};
       const pendingCommand = existing.pendingCommand || null;
@@ -372,12 +470,13 @@ export const gasApi = {
         totalQuestions: Number(totalQuestions) || 25,
         violations: Number(violations) || 0,
         lastViolationMsg: lastViolationMsg || '',
+        draftAnswers: draftAnswers || existing.draftAnswers || null,
         lastHeartbeat: new Date().toISOString(),
         status: 'in_progress',
         pendingCommand: null
       };
       saveMockDb(db);
-      return { status: 'success', pendingCommand };
+      return { status: 'success', sessionActive: true, pendingCommand };
     }
 
     try {
@@ -390,7 +489,8 @@ export const gasApi = {
           answeredCount,
           totalQuestions,
           violations,
-          lastViolationMsg
+          lastViolationMsg,
+          draftAnswers
         })
       });
       return await response.json();
@@ -688,6 +788,20 @@ export const gasApi = {
       } else {
         session.session_id = 'SES-' + Date.now();
         db.sessions.push(session);
+      }
+      // Jika sesi dinonaktifkan, reset plotting tabel peserta kembali ke awal (tanpa plotting paket/status)
+      if (session.is_active === false) {
+        db.participants = (db.participants || []).map(p => ({
+          ...p,
+          session_id: '',
+          paket: '-',
+          token_used: '',
+          start_time: '',
+          status: 'registered'
+        }));
+        if (db.liveProctor) {
+          db.liveProctor = {};
+        }
       }
       saveMockDb(db);
       this.clearDashboardCache();

@@ -9,7 +9,8 @@ export const QuestionCard = ({
   userAnswer,
   onAnswerChange,
   isFlagged,
-  onToggleFlag
+  onToggleFlag,
+  fontSizeClass = 'text-base leading-relaxed'
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
 
@@ -68,7 +69,7 @@ export const QuestionCard = ({
 
       {/* Teks Soal & Media Gambar */}
       <div className="space-y-4">
-        <p className="text-slate-800 text-base md:text-lg leading-relaxed font-normal whitespace-pre-line no-select">
+        <p className={`text-slate-800 ${fontSizeClass} font-normal whitespace-pre-line no-select`}>
           {question.question_text && !['single_choice', 'multiple_choice', 'essay'].includes(String(question.question_text).trim())
             ? question.question_text
             : (question.options && question.options.length > 0
@@ -104,6 +105,7 @@ export const QuestionCard = ({
                   displayLabel={displayLabel}
                   type="single_choice"
                   isSelected={userAnswer === opt.id}
+                  fontSizeClass={fontSizeClass}
                   onSelect={() => handleSingleSelect(opt.id)}
                 />
               );
@@ -124,6 +126,7 @@ export const QuestionCard = ({
                   displayLabel={displayLabel}
                   type="multiple_choice"
                   isSelected={isSelected}
+                  fontSizeClass={fontSizeClass}
                   onSelect={() => handleMultipleSelect(opt.id)}
                 />
               );
@@ -141,7 +144,7 @@ export const QuestionCard = ({
               value={userAnswer || ''}
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder="Tulis jawaban lengkap Anda di sini..."
-              className="w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 text-sm text-slate-800 transition resize-y font-medium"
+              className={`w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 ${fontSizeClass} text-slate-800 transition resize-y font-medium`}
             />
             <p className="text-right text-xs text-slate-400">
               {(userAnswer || '').length} karakter

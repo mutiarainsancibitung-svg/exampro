@@ -15,7 +15,7 @@ const SHEETS = {
 };
 
 const HEADERS = {
-  Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at'],
+  Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at', 'start_at', 'end_at'],
   Questions: ['question_id', 'session_id', 'paket', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
   Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'kelas', 'institution', 'paket', 'token_used', 'start_time', 'status'],
   Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at'],
@@ -276,7 +276,9 @@ function checkAndRepairDatabase() {
           true,
           true,
           true,
-          new Date().toISOString()
+          new Date().toISOString(),
+          '',
+          ''
         ]);
         actionTaken += ' + Sesi ujian awal ditambahkan';
       }
@@ -510,11 +512,45 @@ function isRotatingTokenMatch(inputToken, sessionId, staticToken) {
 }
 
 /**
+ * Validasi apakah waktu saat ini berada dalam rentang jadwal sesi ujian (start_at s.d. end_at)
+ */
+function isSessionWithinSchedule(session) {
+  if (!session) return { ok: false, message: 'Sesi ujian tidak ditemukan' };
+  const nowMs = new Date().getTime();
+
+  if (session.start_at) {
+    const startMs = new Date(session.start_at).getTime();
+    if (!isNaN(startMs) && nowMs < startMs) {
+      return {
+        ok: false,
+        code: 'NOT_STARTED',
+        message: 'Ujian belum dibuka. Jadwal mulai: ' + Utilities.formatDate(new Date(startMs), Session.getScriptTimeZone() || 'Asia/Jakarta', 'dd/MM/yyyy HH:mm')
+      };
+    }
+  }
+
+  if (session.end_at) {
+    const endMs = new Date(session.end_at).getTime();
+    if (!isNaN(endMs) && nowMs > endMs) {
+      return {
+        ok: false,
+        code: 'ENDED',
+        message: 'Rentang waktu pelaksanaan ujian telah berakhir pada ' + Utilities.formatDate(new Date(endMs), Session.getScriptTimeZone() || 'Asia/Jakarta', 'dd/MM/yyyy HH:mm')
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
  * Invalidation Cache Ujian ketika Admin Mengubah Data (Tahap 2)
  */
 function clearExamCache(sessionId) {
   try {
     const cache = CacheService.getScriptCache();
+    // Naikkan versi cache global sesi & token agar status aktif/nonaktif & jadwal langsung efektif detik itu juga
+    cache.put('sessions_version', String(new Date().getTime()), 21600);
     const commonPakets = ['pretest', 'postest', 'all', 'paket 1', 'paket 2', 'paket a', 'paket b'];
     if (sessionId) {
       commonPakets.forEach(function(p) {
@@ -522,6 +558,7 @@ function clearExamCache(sessionId) {
       });
       cache.remove('sess_id_' + sessionId);
       cache.remove('scoring_keys_' + sessionId);
+      cache.remove('proctor_' + sessionId);
     }
     cache.remove('all_sessions_cache');
   } catch (e) {}
@@ -532,13 +569,18 @@ function handleGetSession(token, sessionSalt) {
   
   const cleanToken = String(token).trim().toUpperCase();
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'sess_token_' + cleanToken;
+  const sessVer = cache.get('sessions_version') || '1';
+  const cacheKey = 'sess_token_v' + sessVer + '_' + cleanToken;
 
-  // 1. Cek RAM CacheService untuk respons kilat (0 ms Google Sheets)
+  // 1. Cek RAM CacheService untuk respons kilat (terikat pada sessions_version)
   const cachedSess = cache.get(cacheKey);
   if (cachedSess) {
     try {
       const parsedSess = JSON.parse(cachedSess);
+      const schedCheck = isSessionWithinSchedule(parsedSess);
+      if (!schedCheck.ok) {
+        return { status: 'error', message: schedCheck.message };
+      }
       return { status: 'success', session: parsedSess, cached: true };
     } catch (e) {}
   }
@@ -561,7 +603,12 @@ function handleGetSession(token, sessionSalt) {
   }
 
   if (String(session.is_active).toUpperCase() !== 'TRUE') {
-    return { status: 'error', message: 'Sesi ujian ini sedang nonaktif atau sudah ditutup' };
+    return { status: 'error', message: 'Sesi ujian ini sedang nonaktif atau sudah ditutup oleh panitia' };
+  }
+
+  const schedCheck = isSessionWithinSchedule(session);
+  if (!schedCheck.ok) {
+    return { status: 'error', message: schedCheck.message };
   }
 
   const sessionObj = {
@@ -569,15 +616,17 @@ function handleGetSession(token, sessionSalt) {
     title: session.title,
     type: session.type,
     token: session.token,
-    duration_minutes: Number(session.duration_minutes),
+    duration_minutes: Number(session.duration_minutes) || 60,
     shuffle_questions: String(session.shuffle_questions).toUpperCase() === 'TRUE',
     shuffle_options: String(session.shuffle_options).toUpperCase() === 'TRUE',
-    show_score: String(session.show_score).toUpperCase() === 'TRUE'
+    show_score: String(session.show_score).toUpperCase() !== 'FALSE',
+    start_at: session.start_at || '',
+    end_at: session.end_at || ''
   };
 
-  // Simpan ke RAM cache selama 30 menit (1800 detik)
+  // Simpan ke RAM cache selama 5 menit (300 detik)
   try {
-    cache.put(cacheKey, JSON.stringify(sessionObj), 1800);
+    cache.put(cacheKey, JSON.stringify(sessionObj), 300);
   } catch (e) {}
 
   return {
@@ -695,11 +744,16 @@ function handleStartExam(payload) {
   const session = sessionRes.session;
   const ss = getSpreadsheet();
   const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
 
   const cleanIdentifier = String(identifier).trim();
+  const cleanIdentLower = cleanIdentifier.toLowerCase();
   const now = new Date().toISOString();
+  const nowMs = new Date().getTime();
+  let effectiveStartTime = now;
 
   let existingRow = -1;
+  let existingRowData = null;
   let participantId = null;
 
   // Cari apakah peserta sudah terdaftar di sheet peserta berdasarkan username / identifier
@@ -710,26 +764,79 @@ function handleStartExam(payload) {
       const rowUsername = String(data[i][2]).trim().toLowerCase();
       const rowIdent = String(data[i][6]).trim().toLowerCase();
 
-      if (rowUsername === cleanIdentifier.toLowerCase() || rowIdent === cleanIdentifier.toLowerCase() || rowPId === cleanIdentifier) {
+      if (rowUsername === cleanIdentLower || rowIdent === cleanIdentLower || rowPId.toLowerCase() === cleanIdentLower) {
         existingRow = i + 1;
+        existingRowData = data[i];
         participantId = rowPId;
         break;
       }
     }
   }
 
-  if (existingRow > 0) {
-    // Update baris peserta yang sudah ada (status: in_progress, start_time, token_used, session_id)
+  // Cek apakah sudah pernah submit di sheet Submissions untuk sesi ini
+  let alreadySubmitted = false;
+  if (subSheet && subSheet.getLastRow() > 1) {
+    const subRows = subSheet.getDataRange().getValues();
+    for (let s = 1; s < subRows.length; s++) {
+      const subPId = String(subRows[s][1] || '').trim().toLowerCase();
+      const subSessId = String(subRows[s][2] || '').trim();
+      if (subSessId === String(session.session_id) &&
+          (subPId === cleanIdentLower || (participantId && subPId === String(participantId).trim().toLowerCase()))) {
+        alreadySubmitted = true;
+        break;
+      }
+    }
+  }
+
+  if (existingRow > 0 && existingRowData) {
     const statusCol = HEADERS.Participants.indexOf('status') + 1;
     const startCol = HEADERS.Participants.indexOf('start_time') + 1;
     const tokenCol = HEADERS.Participants.indexOf('token_used') + 1;
     const sessCol = HEADERS.Participants.indexOf('session_id') + 1;
 
+    const existingStatus = String(existingRowData[statusCol - 1] || '').trim().toLowerCase();
+    const existingStartTime = existingRowData[startCol - 1];
+    const existingSessId = String(existingRowData[sessCol - 1] || '').trim();
+
+    // 1. Tolak jika peserta sudah mengumpulkan ujian di sesi ini
+    if (alreadySubmitted || (existingStatus === 'submitted' && (!existingSessId || existingSessId === String(session.session_id)))) {
+      if (tokenCol > 0) partSheet.getRange(existingRow, tokenCol).setValue('');
+      return {
+        status: 'error',
+        message: 'Anda sudah menyelesaikan dan mengumpulkan ujian pada sesi ini. Token tidak dapat digunakan lagi.'
+      };
+    }
+
+    // 2. Jika status sedang ujian (in_progress), cek apakah waktunya sudah habis
+    if (existingStatus === 'in_progress' && existingStartTime && (!existingSessId || existingSessId === String(session.session_id))) {
+      const prevStartMs = new Date(existingStartTime).getTime();
+      const durationMs = (Number(session.duration_minutes) || 60) * 60000;
+      if (!isNaN(prevStartMs)) {
+        if (nowMs >= prevStartMs + durationMs) {
+          // Waktu sudah habis: kunci & hapus token agar tidak bisa masuk lagi
+          if (statusCol > 0) partSheet.getRange(existingRow, statusCol).setValue('submitted');
+          if (tokenCol > 0) partSheet.getRange(existingRow, tokenCol).setValue('');
+          return {
+            status: 'error',
+            message: 'Waktu pengerjaan ujian Anda telah habis! Anda tidak dapat masuk kembali menggunakan token yang sama.'
+          };
+        }
+        // Masih dalam durasi: lanjutkan dengan waktu mulai asli (tidak mereset timer)
+        effectiveStartTime = new Date(prevStartMs).toISOString();
+      }
+    }
+
     if (statusCol > 0) partSheet.getRange(existingRow, statusCol).setValue('in_progress');
-    if (startCol > 0) partSheet.getRange(existingRow, startCol).setValue(now);
+    if (startCol > 0) partSheet.getRange(existingRow, startCol).setValue(effectiveStartTime);
     if (tokenCol > 0) partSheet.getRange(existingRow, tokenCol).setValue(token.trim().toUpperCase());
     if (sessCol > 0) partSheet.getRange(existingRow, sessCol).setValue(session.session_id);
   } else {
+    if (alreadySubmitted) {
+      return {
+        status: 'error',
+        message: 'Anda sudah menyelesaikan dan mengumpulkan ujian pada sesi ini. Token tidak dapat digunakan lagi.'
+      };
+    }
     // Jika peserta baru (walk-in), buat baris lengkap 13 kolom
     participantId = 'P-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000);
     partSheet.appendRow([
@@ -744,7 +851,7 @@ function handleStartExam(payload) {
       payload.institution || '',
       payload.paket || session.type || 'Pretest',
       token.trim().toUpperCase(),
-      now,
+      effectiveStartTime,
       'in_progress'
     ]);
   }
@@ -757,22 +864,23 @@ function handleStartExam(payload) {
   if (cachedStr) {
     try { proctorData = JSON.parse(cachedStr); } catch (e) {}
   }
+  const existingLive = proctorData[participantId] || {};
   proctorData[participantId] = {
     participantId: participantId,
     sessionId: session.session_id,
-    answeredCount: 0,
-    totalQuestions: 25,
-    violations: 0,
+    answeredCount: existingLive.answeredCount || 0,
+    totalQuestions: existingLive.totalQuestions || 25,
+    violations: existingLive.violations || 0,
     lastHeartbeat: now,
     status: 'in_progress'
   };
-  proctorData[cleanIdentifier.toLowerCase()] = proctorData[participantId];
+  proctorData[cleanIdentLower] = proctorData[participantId];
   try { cache.put(cacheKey, JSON.stringify(proctorData), 10800); } catch (e) {}
 
   return {
     status: 'success',
     participantId: participantId,
-    startTime: now,
+    startTime: effectiveStartTime,
     session: session
   };
 }
@@ -852,18 +960,24 @@ function handleSubmitExam(payload) {
       submittedAt
     ]);
 
-    // Update status peserta di sheet participants
+    // Update status peserta di sheet participants menjadi 'submitted' dan HAPUS token_used agar tidak bisa dipakai lagi
     const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
     if (partSheet && partSheet.getLastRow() > 1) {
       const partRows = partSheet.getDataRange().getValues();
       const statusCol = HEADERS.Participants.indexOf('status') + 1;
+      const tokenCol = HEADERS.Participants.indexOf('token_used') + 1;
       const colToUpdate = statusCol > 0 ? statusCol : 13;
 
       for (let i = 1; i < partRows.length; i++) {
         const rowPId = String(partRows[i][0]).trim();
         const rowUsername = String(partRows[i][2]).trim().toLowerCase();
-        if (rowPId === String(participantId).trim() || rowUsername === String(participantId).trim().toLowerCase()) {
+        const rowIdent = String(partRows[i][6]).trim().toLowerCase();
+        const targetLower = String(participantId).trim().toLowerCase();
+        if (rowPId === String(participantId).trim() || rowUsername === targetLower || rowIdent === targetLower) {
           partSheet.getRange(i + 1, colToUpdate).setValue('submitted');
+          if (tokenCol > 0) {
+            partSheet.getRange(i + 1, tokenCol).setValue('');
+          }
           break;
         }
       }
@@ -1066,10 +1180,22 @@ function handleSaveSession(payload) {
   }
 
   const ss = getSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.SESSIONS);
+  let sheet = ss.getSheetByName(SHEETS.SESSIONS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.SESSIONS);
+    sheet.appendRow(HEADERS.Sessions);
+    formatHeaderRow(sheet, HEADERS.Sessions.length);
+  }
+  // Pastikan header memiliki kolom start_at & end_at (kolom 11 & 12)
+  if (sheet.getLastColumn() < HEADERS.Sessions.length) {
+    sheet.getRange(1, 1, 1, HEADERS.Sessions.length).setValues([HEADERS.Sessions]);
+    formatHeaderRow(sheet, HEADERS.Sessions.length);
+  }
+
   const rows = sheet.getDataRange().getValues();
   const sessionId = session.session_id || ('SES-' + new Date().getTime());
-  
+  const isNowActive = session.is_active !== false && String(session.is_active).toUpperCase() !== 'FALSE';
+
   let existingRow = -1;
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) === String(sessionId)) {
@@ -1084,11 +1210,13 @@ function handleSaveSession(payload) {
     session.type || 'pretest',
     String(session.token).trim().toUpperCase(),
     Number(session.duration_minutes) || 60,
-    session.is_active !== false,
+    isNowActive,
     session.shuffle_questions !== false,
     session.shuffle_options !== false,
     session.show_score !== false,
-    session.created_at || new Date().toISOString()
+    session.created_at || new Date().toISOString(),
+    session.start_at || '',
+    session.end_at || ''
   ];
 
   if (existingRow > 0) {
@@ -1097,8 +1225,67 @@ function handleSaveSession(payload) {
     sheet.appendRow(rowData);
   }
 
+  // Jika sesi DINONAKTIFKAN, kembalikan tabel peserta ke kondisi awal (tanpa plotting paket/sesi/token/status),
+  // riwayat nilai pada sheet Submissions tetap dipertahankan.
+  let resetCount = 0;
+  if (!isNowActive) {
+    resetCount = resetParticipantsPlottingForSession(ss, sessionId);
+  }
+
   clearExamCache(sessionId);
-  return { status: 'success', message: 'Sesi ujian berhasil disimpan', sessionId: sessionId };
+  return {
+    status: 'success',
+    message: isNowActive
+      ? 'Sesi ujian berhasil disimpan'
+      : `Sesi ujian dinonaktifkan. ${resetCount > 0 ? resetCount + ' peserta dikembalikan ke status awal (tanpa plotting).' : 'Peserta di ruang ujian otomatis dikeluarkan.'}`,
+    sessionId: sessionId,
+    resetCount: resetCount
+  };
+}
+
+/**
+ * Reset plotting peserta (session_id, paket, token_used, start_time, status) ketika mata ujian dinonaktifkan
+ * agar tabel peserta & Excel kembali bersih seperti sebelum ujian (tanpa menghapus data di sheet Submissions).
+ */
+function resetParticipantsPlottingForSession(ss, sessionId) {
+  if (!ss) ss = getSpreadsheet();
+  const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (!partSheet || partSheet.getLastRow() <= 1) return 0;
+
+  const data = partSheet.getDataRange().getValues();
+  const numCols = Math.max(data[0].length, HEADERS.Participants.length);
+  const sessColIdx = HEADERS.Participants.indexOf('session_id');
+  const paketColIdx = HEADERS.Participants.indexOf('paket');
+  const tokenColIdx = HEADERS.Participants.indexOf('token_used');
+  const startColIdx = HEADERS.Participants.indexOf('start_time');
+  const statusColIdx = HEADERS.Participants.indexOf('status');
+
+  let resetCount = 0;
+  const updatedMatrix = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i].slice();
+    while (row.length < numCols) row.push('');
+
+    const rowSess = String(row[sessColIdx] || '').trim();
+    const rowStatus = String(row[statusColIdx] || '').trim().toLowerCase();
+    const rowPaket = String(row[paketColIdx] || '').trim();
+
+    if (!sessionId || rowSess === String(sessionId) || rowSess === '' || rowStatus !== 'registered' || (rowPaket && rowPaket !== '-')) {
+      row[sessColIdx] = '';
+      row[paketColIdx] = '-';
+      row[tokenColIdx] = '';
+      row[startColIdx] = '';
+      row[statusColIdx] = 'registered';
+      resetCount++;
+    }
+    updatedMatrix.push(row.slice(0, HEADERS.Participants.length));
+  }
+
+  if (updatedMatrix.length > 0) {
+    partSheet.getRange(2, 1, updatedMatrix.length, HEADERS.Participants.length).setValues(updatedMatrix);
+  }
+  return resetCount;
 }
 
 function handleDeleteSession(payload) {
@@ -1509,7 +1696,23 @@ function handleParticipantLogin(payload) {
     return { status: 'error', message: 'Username dan password wajib diisi' };
   }
 
-  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS);
+  const ss = getSpreadsheet();
+  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS, ss);
+  const openSessions = sessions.filter(function(s) {
+    return String(s.is_active).toUpperCase() === 'TRUE' && isSessionWithinSchedule(s).ok;
+  });
+
+  if (openSessions.length === 0) {
+    // Beri pesan spesifik jika ada sesi aktif namun di luar rentang jadwal
+    const activeOnly = sessions.find(function(s) { return String(s.is_active).toUpperCase() === 'TRUE'; });
+    if (activeOnly) {
+      const schedMsg = isSessionWithinSchedule(activeOnly).message;
+      return { status: 'error', message: schedMsg || 'Ujian di luar rentang waktu pelaksanaan.' };
+    }
+    return { status: 'error', message: 'Seluruh mata ujian sedang dinonaktifkan / ditutup oleh panitia. Anda tidak dapat login saat ini.' };
+  }
+
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss);
   const userClean = String(username).trim().toLowerCase();
   const passClean = String(password).trim();
 
@@ -1522,18 +1725,57 @@ function handleParticipantLogin(payload) {
     return { status: 'error', message: 'Username atau password salah! Pastikan akun telah didaftarkan oleh Admin.' };
   }
 
+  // Tentukan sesi target peserta (sesi yang terplotting atau sesi aktif pertama)
+  const targetSession = (found.session_id && openSessions.find(s => String(s.session_id) === String(found.session_id))) || openSessions[0];
+
+  // Cek apakah akun ini sudah menyelesaikan sesi ujian
+  const submissions = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
+  const pIdLower = String(found.participant_id || '').trim().toLowerCase();
+  const hasSubmitted = submissions.some(function(s) {
+    const sPid = String(s.participant_id || '').trim().toLowerCase();
+    return String(s.session_id) === String(targetSession.session_id) &&
+           (sPid === userClean || (pIdLower && sPid === pIdLower));
+  });
+
+  if (hasSubmitted || (String(found.status || '').toLowerCase() === 'submitted' && (!found.session_id || String(found.session_id) === String(targetSession.session_id)))) {
+    return {
+      status: 'error',
+      message: 'Anda sudah menyelesaikan dan mengumpulkan ujian pada sesi ini. Akses login dan token tidak dapat digunakan kembali.'
+    };
+  }
+
+  // Cek jika status in_progress tapi waktu durasi pengerjaan sudah habis
+  if (String(found.status || '').toLowerCase() === 'in_progress' && found.start_time) {
+    const startMs = new Date(found.start_time).getTime();
+    const durationMs = (Number(targetSession.duration_minutes) || 60) * 60000;
+    if (!isNaN(startMs) && new Date().getTime() >= startMs + durationMs) {
+      return {
+        status: 'error',
+        message: 'Waktu pengerjaan ujian Anda telah habis. Anda tidak diperkenankan masuk kembali menggunakan token yang sama.'
+      };
+    }
+  }
+
   return {
     status: 'success',
     participant: {
       participant_id: found.participant_id,
       username: found.username,
       full_name: found.full_name,
-      gender: found.gender || 'Laki-Laki',
+      gender: found.gender || '-',
       identifier: found.identifier,
-      kelas: found.kelas || 'Kelas A',
+      kelas: found.kelas || '-',
       institution: found.institution || '',
-      paket: found.paket || 'Pretest',
+      paket: (found.paket && found.paket !== '-') ? found.paket : (targetSession.type || 'Pretest'),
       status: found.status
+    },
+    activeSession: {
+      session_id: targetSession.session_id,
+      title: targetSession.title,
+      type: targetSession.type,
+      duration_minutes: Number(targetSession.duration_minutes) || 60,
+      start_at: targetSession.start_at || '',
+      end_at: targetSession.end_at || ''
     }
   };
 }
@@ -1748,9 +1990,30 @@ function handleDeleteAllParticipants(payload) {
  * Disimpan di CacheService (RAM) untuk performa instan tanpa membebani spreadsheet.
  */
 function handleUpdateExamProgress(payload) {
-  const { participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg } = payload;
+  const { participantId, sessionId, answeredCount, totalQuestions, violations, lastViolationMsg, draftAnswers } = payload;
   if (!participantId || !sessionId) {
     return { status: 'error', message: 'Data heartbeat tidak lengkap' };
+  }
+
+  // Periksa status keaktifan & rentang jadwal sesi secara real-time (jika dinonaktifkan -> keluarkan peserta)
+  const sessions = getSheetDataAsObjects(SHEETS.SESSIONS);
+  const activeSess = sessions.find(function(s) { return String(s.session_id) === String(sessionId); });
+  if (!activeSess || String(activeSess.is_active).toUpperCase() !== 'TRUE') {
+    return {
+      status: 'success',
+      sessionActive: false,
+      forcedLogout: true,
+      reason: 'Mata ujian telah dinonaktifkan oleh panitia. Anda otomatis dikeluarkan dari ruang ujian.'
+    };
+  }
+  const schedCheck = isSessionWithinSchedule(activeSess);
+  if (!schedCheck.ok) {
+    return {
+      status: 'success',
+      sessionActive: false,
+      forcedLogout: true,
+      reason: schedCheck.message || 'Rentang waktu ujian telah berakhir.'
+    };
   }
 
   const cache = CacheService.getScriptCache();
@@ -1774,6 +2037,7 @@ function handleUpdateExamProgress(payload) {
     totalQuestions: Number(totalQuestions) || existing.totalQuestions || 25,
     violations: Number(violations) || existing.violations || 0,
     lastViolationMsg: lastViolationMsg || existing.lastViolationMsg || '',
+    draftAnswers: draftAnswers || existing.draftAnswers || null,
     lastHeartbeat: now,
     status: existing.status || 'in_progress',
     pendingCommand: null // clear once delivered
@@ -1784,6 +2048,7 @@ function handleUpdateExamProgress(payload) {
 
   return {
     status: 'success',
+    sessionActive: true,
     pendingCommand: pendingCommand,
     serverTime: now
   };
