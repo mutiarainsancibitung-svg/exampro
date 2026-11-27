@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext();
 
@@ -57,17 +57,17 @@ export const AuthProvider = ({ children }) => {
     }
   }, [adminUser]);
 
-  const loginParticipant = (participantInfo, sessionInfo) => {
+  const loginParticipant = useCallback((participantInfo, sessionInfo) => {
     setParticipant(participantInfo);
     setSessionData(sessionInfo);
-  };
+  }, []);
 
-  const logoutParticipant = () => {
+  const logoutParticipant = useCallback(() => {
     setParticipant(null);
     setSessionData(null);
     sessionStorage.removeItem('exampro_participant');
     sessionStorage.removeItem('exampro_session');
-  };
+  }, []);
 
   const loginAdmin = (secretKey, userData = null) => {
     setAdminSecretKey(secretKey);

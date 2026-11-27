@@ -41,7 +41,7 @@ function doGet(e) {
         responseData = handleGetSession(params.token);
         break;
       case 'getExamQuestions':
-        responseData = handleGetExamQuestions(params.token, params.participantId, params.paket);
+        responseData = handleGetExamQuestions(params.token, params.participantId, params.paket, params.sessionId);
         break;
       case 'getAdminDashboard':
         responseData = handleGetAdminDashboard(params.secretKey);
@@ -645,8 +645,36 @@ function handleGetSession(token, sessionSalt) {
  * Pengambilan Soal Ujian dengan Akselerasi RAM Caching (Tahap 2)
  * Ribuan request peserta disajikan dari RAM tanpa menyentuh Google Sheets!
  */
-function handleGetExamQuestions(token, participantId, paket) {
-  const sessionRes = handleGetSession(token);
+function handleGetExamQuestions(token, participantId, paket, sessionId) {
+  let sessionRes = token ? handleGetSession(token, sessionId) : { status: 'error' };
+  if (sessionRes.status !== 'success' && sessionId) {
+    const allSessions = getSheetDataAsObjects(SHEETS.SESSIONS);
+    const fallbackSess = allSessions.find(function(s) { return String(s.session_id) === String(sessionId); });
+    if (fallbackSess) {
+      if (String(fallbackSess.is_active).toUpperCase() !== 'TRUE') {
+        return { status: 'error', message: 'Sesi ujian ini sedang nonaktif atau sudah ditutup oleh panitia' };
+      }
+      const schedCheck = isSessionWithinSchedule(fallbackSess);
+      if (!schedCheck.ok) {
+        return { status: 'error', message: schedCheck.message };
+      }
+      sessionRes = {
+        status: 'success',
+        session: {
+          session_id: fallbackSess.session_id,
+          title: fallbackSess.title,
+          type: fallbackSess.type,
+          token: fallbackSess.token,
+          duration_minutes: Number(fallbackSess.duration_minutes) || 60,
+          shuffle_questions: String(fallbackSess.shuffle_questions).toUpperCase() === 'TRUE',
+          shuffle_options: String(fallbackSess.shuffle_options).toUpperCase() === 'TRUE',
+          show_score: String(fallbackSess.show_score).toUpperCase() !== 'FALSE',
+          start_at: fallbackSess.start_at || '',
+          end_at: fallbackSess.end_at || ''
+        }
+      };
+    }
+  }
   if (sessionRes.status !== 'success') return sessionRes;
 
   const session = sessionRes.session;

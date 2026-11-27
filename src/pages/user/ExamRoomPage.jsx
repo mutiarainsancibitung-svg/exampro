@@ -12,7 +12,7 @@ import { ViolationModal } from '../../components/exam/ViolationModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type, ArrowDown, ArrowUp, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type, ArrowDown, ArrowUp, Lock, RotateCw, LogOut } from 'lucide-react';
 
 const MIN_FONT_SIZE = 14;
 const MAX_FONT_SIZE = 28;
@@ -21,7 +21,7 @@ const FONT_STEP = 2;
 
 export const ExamRoomPage = () => {
   const navigate = useNavigate();
-  const { participant, sessionData, isParticipantLoggedIn } = useAuth();
+  const { participant, sessionData, isParticipantLoggedIn, logoutParticipant } = useAuth();
   const {
     questions,
     currentIndex,
@@ -34,6 +34,7 @@ export const ExamRoomPage = () => {
     toggleFlag,
     answeredCount,
     loading,
+    loadError,
     submitting,
     violations,
     registerViolation,
@@ -63,20 +64,26 @@ export const ExamRoomPage = () => {
   const handleDecreaseFont = () => updateFontSize(fontSizePx - FONT_STEP);
   const handleIncreaseFont = () => updateFontSize(fontSizePx + FONT_STEP);
 
-  // Proteksi rute & auto-exit jika sesi dinonaktifkan pengawas
+  // Auto-exit jika sesi dinonaktifkan pengawas
   useEffect(() => {
     if (sessionTerminatedReason) {
       alert(sessionTerminatedReason);
       clearSessionTerminatedReason();
       navigate('/');
-      return;
     }
+  }, [sessionTerminatedReason, clearSessionTerminatedReason, navigate]);
+
+  // Proteksi rute & muat soal sekali per sesi login peserta
+  const participantKey = participant?.participantId || '';
+  const sessionKey = sessionData?.session_id || '';
+  useEffect(() => {
     if (!isParticipantLoggedIn) {
       navigate('/');
-    } else {
-      loadQuestions();
+      return;
     }
-  }, [isParticipantLoggedIn, sessionTerminatedReason, clearSessionTerminatedReason, navigate, loadQuestions]);
+    loadQuestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isParticipantLoggedIn, participantKey, sessionKey, navigate]);
 
   // Hook Anti-Cheat
   const {
@@ -134,13 +141,54 @@ export const ExamRoomPage = () => {
     );
   }
 
-  if (loading || !currentQuestion) {
+  if (loading) {
     return (
       <LoadingScreen
         fullScreen
         message="Menyiapkan Lembar Ujian Pelatihan Guru PAI..."
         submessage="Sedang mengunduh butir soal, opsi jawaban, dan menyinkronkan pengawas waktu ujian..."
       />
+    );
+  }
+
+  if (loadError || !currentQuestion) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mint-grid p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 shadow-lg p-7 text-center space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-3xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="font-extrabold text-slate-900 text-base">
+              Soal Ujian Belum Dapat Ditampilkan
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {loadError || `Butir soal untuk paket "${participant?.paket || '-'}" belum tersedia atau gagal diunduh dari server.`}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+            <Button
+              variant="primary"
+              className="flex-1 justify-center"
+              icon={RotateCw}
+              onClick={() => loadQuestions()}
+            >
+              Muat Ulang Soal
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 justify-center border-slate-200 text-slate-700"
+              icon={LogOut}
+              onClick={() => {
+                logoutParticipant();
+                navigate('/');
+              }}
+            >
+              Kembali ke Login
+            </Button>
+          </div>
+        </div>
+      </div>
     );
   }
 

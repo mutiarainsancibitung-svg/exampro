@@ -11,11 +11,16 @@ export const ExamProvider = ({ children }) => {
   const [answers, setAnswers] = useState({});
   const [flagged, setFlagged] = useState({}); // Soal ragu-ragu: { question_id: boolean }
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [examResult, setExamResult] = useState(null);
   const [violations, setViolations] = useState(0);
   const [proctorMessage, setProctorMessage] = useState(null);
   const [sessionTerminatedReason, setSessionTerminatedReason] = useState(null);
+
+  const clearProctorMessage = useCallback(() => setProctorMessage(null), []);
+  const clearSessionTerminatedReason = useCallback(() => setSessionTerminatedReason(null), []);
+  const loadingQuestionsRef = useRef(false);
 
   // Refs untuk mencegah stale closure saat waktu habis / auto-submit / force_submit
   const answersRef = useRef(answers);
@@ -63,27 +68,40 @@ export const ExamProvider = ({ children }) => {
 
   // Muat daftar soal saat peserta masuk
   const loadQuestions = useCallback(async () => {
-    if (!participant || !sessionData) return;
+    if (!participant || !sessionData || loadingQuestionsRef.current) return;
+    loadingQuestionsRef.current = true;
     setLoading(true);
+    setLoadError('');
     try {
       const res = await gasApi.getExamQuestions(
         sessionData.token || participant.token,
         participant.participantId,
-        participant.paket
+        participant.paket,
+        sessionData.session_id
       );
-      if (res.status === 'success') {
-        setQuestions(res.questions || []);
+      if (res && res.status === 'success') {
+        const list = res.questions || [];
+        setQuestions(list);
+        if (list.length === 0) {
+          setLoadError(`Belum ada butir soal pada paket "${participant.paket || 'Pretest'}". Silakan hubungi Pengawas atau Admin.`);
+        }
+      } else {
+        setLoadError(res?.message || 'Gagal memuat daftar soal ujian dari server.');
       }
     } catch (err) {
       console.error('Gagal memuat soal:', err);
-      const msg = String(err?.message || '').toLowerCase();
+      const errMsg = err?.message || 'Gagal menghubungi server untuk mengunduh soal ujian.';
+      const msg = String(errMsg).toLowerCase();
       if (msg.includes('nonaktif') || msg.includes('ditutup') || msg.includes('berakhir')) {
         if (storageKey) localStorage.removeItem(storageKey);
         if (flagStorageKey) localStorage.removeItem(flagStorageKey);
-        setSessionTerminatedReason(err.message);
+        setSessionTerminatedReason(errMsg);
         logoutParticipant();
+      } else {
+        setLoadError(errMsg);
       }
     } finally {
+      loadingQuestionsRef.current = false;
       setLoading(false);
     }
   }, [participant, sessionData, storageKey, flagStorageKey, logoutParticipant]);
@@ -243,14 +261,15 @@ export const ExamProvider = ({ children }) => {
         toggleFlag,
         answeredCount,
         loading,
+        loadError,
         submitting,
         examResult,
         violations,
         registerViolation,
         proctorMessage,
-        clearProctorMessage: () => setProctorMessage(null),
+        clearProctorMessage,
         sessionTerminatedReason,
-        clearSessionTerminatedReason: () => setSessionTerminatedReason(null),
+        clearSessionTerminatedReason,
         loadQuestions,
         submitExam
       }}

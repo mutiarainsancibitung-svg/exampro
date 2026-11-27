@@ -311,11 +311,11 @@ export const gasApi = {
   /**
    * Ambil Soal Ujian (Kunci Jawaban Disensor & Filter Berdasarkan Paket)
    */
-  async getExamQuestions(token, participantId, paket) {
+  async getExamQuestions(token, participantId, paket, sessionId = '') {
     if (!this.isConfigured()) {
       await new Promise(r => setTimeout(r, 800));
       const db = getMockDb();
-      let sess = db.sessions[0];
+      let sess = (sessionId && db.sessions.find(s => s.session_id === sessionId)) || db.sessions[0];
       const part = db.participants.find(p => p.participant_id === participantId);
       const targetPaket = paket || part?.paket || 'Pretest';
 
@@ -346,7 +346,7 @@ export const gasApi = {
       return { status: 'success', session: sess, questions, paket: targetPaket };
     }
 
-    const response = await fetch(`${getGasApiUrl()}?action=getExamQuestions&token=${encodeURIComponent(token)}&participantId=${encodeURIComponent(participantId)}&paket=${encodeURIComponent(paket || '')}`);
+    const response = await fetch(`${getGasApiUrl()}?action=getExamQuestions&token=${encodeURIComponent(token || '')}&participantId=${encodeURIComponent(participantId || '')}&paket=${encodeURIComponent(paket || '')}&sessionId=${encodeURIComponent(sessionId || '')}`);
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal memuat soal ujian');
     return data;
