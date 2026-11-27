@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 
 export const Button = ({
   children,
@@ -7,11 +8,13 @@ export const Button = ({
   size = 'md',
   className = '',
   disabled = false,
+  loading = false,
   onClick,
   type = 'button',
   icon: Icon,
   ...props
 }) => {
+  const isDisabled = disabled || loading;
   const baseStyles = 'inline-flex items-center justify-center font-medium rounded-2xl transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
 
   // Tema warna hijau mint Kemenag & UIN Jakarta (Sesuai Gambar 2)
@@ -33,15 +36,19 @@ export const Button = ({
 
   return (
     <motion.button
-      whileHover={{ scale: disabled ? 1 : 1.01 }}
-      whileTap={{ scale: disabled ? 1 : 0.98 }}
+      whileHover={{ scale: isDisabled ? 1 : 1.01 }}
+      whileTap={{ scale: isDisabled ? 1 : 0.98 }}
       type={type}
-      disabled={disabled}
+      disabled={isDisabled}
       onClick={onClick}
       className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >
-      {Icon && <Icon className="w-4 h-4 shrink-0" />}
+      {loading ? (
+        <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+      ) : (
+        Icon && <Icon className="w-4 h-4 shrink-0" />
+      )}
       {children}
     </motion.button>
   );

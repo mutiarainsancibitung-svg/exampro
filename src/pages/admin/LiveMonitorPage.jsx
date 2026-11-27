@@ -349,12 +349,12 @@ export const LiveMonitorPage = () => {
               variant="outline"
               size="sm"
               icon={RefreshCw}
+              loading={refreshing}
               onClick={() => {
                 setCountdown(refreshIntervalSec);
                 fetchProctorData();
               }}
-              disabled={refreshing}
-              className={`border-slate-200 text-slate-700 hover:bg-slate-100 ${refreshing ? 'animate-spin' : ''}`}
+              className="border-slate-200 text-slate-700 hover:bg-slate-100"
             >
               {refreshing ? 'Memperbarui...' : 'Segarkan'}
             </Button>
@@ -533,7 +533,7 @@ export const LiveMonitorPage = () => {
                           {p.full_name}
                         </h4>
                         <p className="text-[11px] text-slate-500 font-mono">
-                          {p.username || p.identifier} • {p.kelas}
+                          {p.username || p.identifier} • {p.kelas} {p.paket && p.paket !== '-' ? `• ${p.paket}` : ''}
                         </p>
                       </div>
                     </div>

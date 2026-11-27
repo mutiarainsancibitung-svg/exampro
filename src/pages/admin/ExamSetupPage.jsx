@@ -40,7 +40,9 @@ export const ExamSetupPage = () => {
   // Workflow state
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [selectedPackage, setSelectedPackage] = useState('');
+  const [targetMode, setTargetMode] = useState('class'); // 'class' | 'individual'
   const [selectedClass, setSelectedClass] = useState('');
+  const [individualSearch, setIndividualSearch] = useState('');
   const [isApplyingClass, setIsApplyingClass] = useState(false);
 
   // Multi-select peserta
@@ -158,18 +160,19 @@ export const ExamSetupPage = () => {
     }
   };
 
-  // Aksi 2: Terapkan Paket ke Peserta yang Dicentang (Selektif)
-  const handleApplyCustomPackageToSelected = async () => {
+  // Aksi 2: Terapkan Paket ke Peserta yang Dicentang (Pilih Per Orang / Selektif)
+  const handleApplyCustomPackageToSelected = async (pkgOverride = null) => {
+    const targetPkg = (typeof pkgOverride === 'string' && pkgOverride) ? pkgOverride : customTargetPackage;
     if (selectedParticipantIds.length === 0) {
-      alert('Pilih minimal satu peserta yang ingin diubah paket soalnya.');
+      alert('Pilih minimal satu peserta (centang nama peserta) yang ingin dipetakan.');
       return;
     }
-    if (!customTargetPackage.trim()) {
-      alert('Pilih paket soal tujuan!');
+    if (!targetPkg.trim()) {
+      alert('Pilih paket soal tujuan pada Langkah 2!');
       return;
     }
 
-    const confirmMsg = `Ubah paket soal untuk ${selectedParticipantIds.length} peserta terpilih menjadi "${customTargetPackage}"?`;
+    const confirmMsg = `Terapkan paket soal "${targetPkg}" (Sesi: ${activeSession?.title || 'Aktif'}) hanya untuk ${selectedParticipantIds.length} peserta terpilih?`;
     if (!window.confirm(confirmMsg)) return;
 
     setIsUpdatingSelected(true);
@@ -177,16 +180,49 @@ export const ExamSetupPage = () => {
       const selectedParts = participants.filter(p => selectedParticipantIds.includes(p.participant_id));
       const updatedList = selectedParts.map(p => ({
         ...p,
-        paket: customTargetPackage,
+        paket: targetPkg,
         session_id: activeSession ? activeSession.session_id : p.session_id
       }));
 
       await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
-      alert(`Berhasil memperbarui paket ${updatedList.length} peserta menjadi "${customTargetPackage}".`);
+      alert(`Berhasil memetakan paket "${targetPkg}" untuk ${updatedList.length} peserta terpilih.`);
       setSelectedParticipantIds([]);
-      loadData();
+      loadData(true);
     } catch (err) {
       alert('Gagal memperbarui paket peserta: ' + err.message);
+    } finally {
+      setIsUpdatingSelected(false);
+    }
+  };
+
+  // Aksi 3: Reset Plotting (Hapus Pemetaan Sesi & Paket) untuk Peserta Terpilih
+  const handleClearPlottingSelected = async () => {
+    if (selectedParticipantIds.length === 0) {
+      alert('Pilih minimal satu peserta yang ingin dibersihkan plotting-nya.');
+      return;
+    }
+    if (!window.confirm(`Hapus plotting mata ujian & paket soal untuk ${selectedParticipantIds.length} peserta terpilih agar kembali menjadi "Belum Diplot"?`)) {
+      return;
+    }
+
+    setIsUpdatingSelected(true);
+    try {
+      const selectedParts = participants.filter(p => selectedParticipantIds.includes(p.participant_id));
+      const updatedList = selectedParts.map(p => ({
+        ...p,
+        paket: '-',
+        session_id: '',
+        token_used: '',
+        start_time: '',
+        status: 'registered'
+      }));
+
+      await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
+      alert(`Plotting untuk ${updatedList.length} peserta berhasil dibersihkan.`);
+      setSelectedParticipantIds([]);
+      loadData(true);
+    } catch (err) {
+      alert('Gagal membersihkan plotting peserta: ' + err.message);
     } finally {
       setIsUpdatingSelected(false);
     }
@@ -361,44 +397,127 @@ export const ExamSetupPage = () => {
             </div>
           </div>
 
-          {/* Langkah 3: Terapkan ke Kelas */}
+          {/* Langkah 3: Terapkan ke Kelas atau Per Orang */}
           <div className="bg-white p-5 rounded-3xl border border-blue-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-1 rounded-xl">
                   Langkah 3
                 </span>
-                <GraduationCap className="w-4 h-4 text-blue-600" />
+                {/* Toggle Button Pilih Kelas vs Pilih Per Orang */}
+                <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setTargetMode('class')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${
+                      targetMode === 'class'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Pilih Kelas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTargetMode('individual')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${
+                      targetMode === 'individual'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Pilih Per Orang
+                  </button>
+                </div>
               </div>
-              <div className="mt-3">
-                <h4 className="text-xs font-bold text-slate-700 mb-1.5">Pemetaan Kelas Sasaran:</h4>
-                <select
-                  value={selectedClass}
-                  onChange={(e) => setSelectedClass(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-2xl border border-blue-300 text-xs font-extrabold text-blue-900 bg-blue-50/50 focus:outline-none"
-                >
-                  {dynamicClasses.map(cls => {
-                    const count = participants.filter(p => (p.kelas || '').trim().toLowerCase() === cls.toLowerCase()).length;
-                    return (
-                      <option key={cls} value={cls}>
-                        {cls} ({count} Peserta)
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+
+              {targetMode === 'class' ? (
+                <div className="mt-3">
+                  <h4 className="text-xs font-bold text-slate-700 mb-1.5">Pemetaan Kelas Sasaran:</h4>
+                  <select
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-2xl border border-blue-300 text-xs font-extrabold text-blue-900 bg-blue-50/50 focus:outline-none"
+                  >
+                    {dynamicClasses.map(cls => {
+                      const count = participants.filter(p => (p.kelas || '').trim().toLowerCase() === cls.toLowerCase()).length;
+                      return (
+                        <option key={cls} value={cls}>
+                          {cls} ({count} Peserta)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-700">Pilih Peserta Per Orang:</h4>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg">
+                      {selectedParticipantIds.length} dipilih
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Cari nama/username peserta..."
+                    value={individualSearch}
+                    onChange={(e) => setIndividualSearch(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-blue-200 text-xs bg-slate-50 focus:bg-white focus:outline-none"
+                  />
+                  <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50/50">
+                    {participants
+                      .filter(p =>
+                        (p.full_name || '').toLowerCase().includes(individualSearch.toLowerCase()) ||
+                        (p.username || '').toLowerCase().includes(individualSearch.toLowerCase())
+                      )
+                      .map((p) => {
+                        const checked = selectedParticipantIds.includes(p.participant_id);
+                        return (
+                          <label
+                            key={p.participant_id}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[11px] hover:bg-blue-50/60 ${
+                              checked ? 'bg-blue-50 font-bold text-blue-900' : 'text-slate-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelectOne(p.participant_id)}
+                              className="rounded text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="truncate flex-1">{p.full_name || p.username}</span>
+                            <span className="text-[10px] text-slate-400 shrink-0">{p.kelas}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-3 pt-3 border-t border-slate-100">
-              <Button
-                variant="primary"
-                size="sm"
-                className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold"
-                onClick={handleApplyClassMapping}
-                loading={isApplyingClass}
-              >
-                Terapkan Paket ke Kelas "{selectedClass}"
-              </Button>
+              {targetMode === 'class' ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                  onClick={handleApplyClassMapping}
+                  loading={isApplyingClass}
+                >
+                  Terapkan Paket ke Kelas "{selectedClass}"
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                  onClick={() => handleApplyCustomPackageToSelected(selectedPackage)}
+                  loading={isUpdatingSelected}
+                  disabled={selectedParticipantIds.length === 0}
+                >
+                  Terapkan Paket ke {selectedParticipantIds.length} Orang Terpilih
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -419,7 +538,7 @@ export const ExamSetupPage = () => {
 
               {/* Batch Action Peserta Terpilih */}
               {selectedParticipantIds.length > 0 && (
-                <div className="flex items-center gap-2 p-2 bg-kemenag-50 border border-kemenag-200 rounded-2xl animate-fade-in">
+                <div className="flex flex-wrap items-center gap-2 p-2 bg-kemenag-50 border border-kemenag-200 rounded-2xl animate-fade-in">
                   <span className="text-xs font-bold text-kemenag-800 px-2">
                     {selectedParticipantIds.length} dipilih
                   </span>
@@ -435,10 +554,19 @@ export const ExamSetupPage = () => {
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={handleApplyCustomPackageToSelected}
+                    onClick={() => handleApplyCustomPackageToSelected()}
                     loading={isUpdatingSelected}
                   >
                     Ganti Paket
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClearPlottingSelected}
+                    loading={isUpdatingSelected}
+                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                  >
+                    Hapus Plotting
                   </Button>
                 </div>
               )}
@@ -544,10 +672,16 @@ export const ExamSetupPage = () => {
                           </span>
                         </td>
                         <td className="py-3 px-4">
-                          <span className="font-bold text-kemenag-800 bg-kemenag-50 border border-kemenag-200 px-2.5 py-1 rounded-xl inline-flex items-center gap-1.5">
-                            <BookOpen className="w-3 h-3 text-kemenag-600" />
-                            {p.paket || 'Pretest'}
-                          </span>
+                          {p.paket && p.paket !== '-' ? (
+                            <span className="font-bold text-kemenag-800 bg-kemenag-50 border border-kemenag-200 px-2.5 py-1 rounded-xl inline-flex items-center gap-1.5">
+                              <BookOpen className="w-3 h-3 text-kemenag-600" />
+                              {p.paket}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 bg-slate-100 px-2.5 py-1 rounded-xl text-[11px] font-medium">
+                              Belum Diplot
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           {isSubmitted ? (

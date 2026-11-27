@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
 import { Card } from '../ui/Card';
 import { OptionItem } from './OptionItem';
-import { Flag, ZoomIn, X } from 'lucide-react';
+import { Flag, ZoomIn, X, Type } from 'lucide-react';
+
+const FONT_SIZE_PX_MAP = {
+  sm: '14px',
+  base: '16px',
+  lg: '18px',
+  xl: '20px'
+};
 
 export const QuestionCard = ({
   questionNumber,
@@ -10,11 +17,15 @@ export const QuestionCard = ({
   onAnswerChange,
   isFlagged,
   onToggleFlag,
+  fontSizeKey = 'base',
+  onFontSizeChange,
   fontSizeClass = 'text-base leading-relaxed'
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
 
   if (!question) return null;
+
+  const fontSizePx = FONT_SIZE_PX_MAP[fontSizeKey] || '16px';
 
   const typeLabels = {
     single_choice: 'Pilihan Ganda Tunggal',
@@ -38,8 +49,8 @@ export const QuestionCard = ({
 
   return (
     <Card className="p-6 md:p-8 space-y-6 bg-white rounded-3xl border border-kemenag-100 shadow-sm">
-      {/* Header Soal */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+      {/* Header Soal + Pengatur Ukuran Font */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-3">
           <span className="flex items-center justify-center w-9 h-9 rounded-2xl bg-kemenag-600 text-white font-extrabold text-sm shadow-sm shadow-kemenag-200">
             {questionNumber}
@@ -52,24 +63,55 @@ export const QuestionCard = ({
           </span>
         </div>
 
-        {/* Tombol Ragu-ragu */}
-        <button
-          onClick={onToggleFlag}
-          type="button"
-          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl text-xs font-semibold transition ${
-            isFlagged
-              ? 'bg-amber-100 text-amber-900 border border-amber-300'
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
-          }`}
-        >
-          <Flag className={`w-3.5 h-3.5 ${isFlagged ? 'fill-amber-600 text-amber-600' : ''}`} />
-          {isFlagged ? 'Ragu-ragu' : 'Tandai Ragu'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {onFontSizeChange && (
+            <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl px-2 py-1">
+              <Type className="w-3.5 h-3.5 text-kemenag-600 mr-0.5" />
+              <span className="text-[11px] font-semibold text-slate-500 mr-1">Ukuran Teks:</span>
+              {[
+                { key: 'sm', label: 'A-' },
+                { key: 'base', label: 'A' },
+                { key: 'lg', label: 'A+' },
+                { key: 'xl', label: 'A++' }
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => onFontSizeChange(opt.key)}
+                  className={`px-2 py-0.5 rounded-xl text-[11px] font-bold transition ${
+                    fontSizeKey === opt.key
+                      ? 'bg-kemenag-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-white hover:text-kemenag-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Tombol Ragu-ragu */}
+          <button
+            onClick={onToggleFlag}
+            type="button"
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl text-xs font-semibold transition ${
+              isFlagged
+                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+            }`}
+          >
+            <Flag className={`w-3.5 h-3.5 ${isFlagged ? 'fill-amber-600 text-amber-600' : ''}`} />
+            {isFlagged ? 'Ragu-ragu' : 'Tandai Ragu'}
+          </button>
+        </div>
       </div>
 
-      {/* Teks Soal & Media Gambar */}
+      {/* Teks Soal & Media Gambar (Ukuran Font Seragam dengan Pilihan Jawaban) */}
       <div className="space-y-4">
-        <p className={`text-slate-800 ${fontSizeClass} font-normal whitespace-pre-line no-select`}>
+        <p
+          style={{ fontSize: fontSizePx, lineHeight: '1.65' }}
+          className={`text-slate-800 ${fontSizeClass} font-normal whitespace-pre-line no-select`}
+        >
           {question.question_text && !['single_choice', 'multiple_choice', 'essay'].includes(String(question.question_text).trim())
             ? question.question_text
             : (question.options && question.options.length > 0
@@ -106,6 +148,7 @@ export const QuestionCard = ({
                   type="single_choice"
                   isSelected={userAnswer === opt.id}
                   fontSizeClass={fontSizeClass}
+                  fontSizePx={fontSizePx}
                   onSelect={() => handleSingleSelect(opt.id)}
                 />
               );
@@ -127,6 +170,7 @@ export const QuestionCard = ({
                   type="multiple_choice"
                   isSelected={isSelected}
                   fontSizeClass={fontSizeClass}
+                  fontSizePx={fontSizePx}
                   onSelect={() => handleMultipleSelect(opt.id)}
                 />
               );
@@ -144,7 +188,8 @@ export const QuestionCard = ({
               value={userAnswer || ''}
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder="Tulis jawaban lengkap Anda di sini..."
-              className={`w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 ${fontSizeClass} text-slate-800 transition resize-y font-medium`}
+              style={{ fontSize: fontSizePx, lineHeight: '1.65' }}
+              className={`w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 ${fontSizeClass} text-slate-800 transition resize-y font-normal`}
             />
             <p className="text-right text-xs text-slate-400">
               {(userAnswer || '').length} karakter

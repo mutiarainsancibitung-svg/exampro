@@ -1725,7 +1725,22 @@ function handleParticipantLogin(payload) {
     return { status: 'error', message: 'Username atau password salah! Pastikan akun telah didaftarkan oleh Admin.' };
   }
 
+  // Pastikan akun peserta sudah dipetakan paket soal & sesi ujian (sesuai Atur Ujian & Bank Soal)
+  const cleanPaket = String(found.paket || '').trim();
+  if (!cleanPaket || cleanPaket === '-') {
+    return {
+      status: 'error',
+      message: 'Akun Anda belum dipetakan ke paket soal / sesi ujian oleh panitia. Silakan hubungi Pengawas atau Admin.'
+    };
+  }
+
   // Tentukan sesi target peserta (sesi yang terplotting atau sesi aktif pertama)
+  if (found.session_id && !openSessions.some(s => String(s.session_id) === String(found.session_id))) {
+    return {
+      status: 'error',
+      message: 'Mata ujian yang dijadwalkan untuk akun Anda sedang dinonaktifkan atau di luar rentang waktu pelaksanaan.'
+    };
+  }
   const targetSession = (found.session_id && openSessions.find(s => String(s.session_id) === String(found.session_id))) || openSessions[0];
 
   // Cek apakah akun ini sudah menyelesaikan sesi ujian
@@ -1806,7 +1821,7 @@ function handleSaveParticipant(payload) {
 
     const rowData = [
       pId,
-      participant.session_id || 'SES-001',
+      participant.session_id !== undefined ? participant.session_id : '',
       participant.username || '',
       participant.password || 'kemenag2026',
       participant.full_name || participant.username || '',
@@ -1815,8 +1830,8 @@ function handleSaveParticipant(payload) {
       participant.kelas || '-',
       participant.institution || '',
       participant.paket || '-',
-      participant.token_used || '',
-      participant.start_time || new Date().toISOString(),
+      participant.token_used !== undefined ? participant.token_used : '',
+      participant.start_time !== undefined ? participant.start_time : '',
       participant.status || 'registered'
     ];
 
@@ -1864,7 +1879,7 @@ function handleBatchSaveParticipants(payload) {
   for (let i = 0; i < participants.length; i++) {
     const p = participants[i];
     const pId = p.participant_id || ('P-' + nowEpoch + '-' + (i + 1) + '-' + Math.floor(Math.random() * 1000));
-    const targetSessionId = sessionId || p.session_id || 'SES-001';
+    const targetSessionId = sessionId !== undefined ? sessionId : (p.session_id !== undefined ? p.session_id : '');
     const cleanUsername = String(p.username || pId).trim();
 
     const cleanGender = (p.gender && String(p.gender).trim() && String(p.gender).trim() !== '-')
@@ -1882,8 +1897,8 @@ function handleBatchSaveParticipants(payload) {
       p.kelas || '-',
       p.institution || '',
       p.paket || '-',
-      p.token_used || '',
-      p.start_time || now,
+      p.token_used !== undefined ? p.token_used : '',
+      p.start_time !== undefined ? p.start_time : '',
       p.status || 'registered'
     ];
 
@@ -2216,8 +2231,38 @@ function handleGetLiveProctor(payload) {
     try { proctorData = JSON.parse(cachedStr); } catch (e) {}
   }
 
-  // Filter peserta untuk sesi ini
-  const rawTargetParts = participants.filter(p => !p.session_id || String(p.session_id) === String(targetSessionId));
+  // Hitung jumlah soal per paket dari Bank Soal
+  const questionCountByPaket = {};
+  allQuestions.forEach(function(q) {
+    const pkt = String(q.paket || 'Pretest').trim().toLowerCase();
+    questionCountByPaket[pkt] = (questionCountByPaket[pkt] || 0) + 1;
+  });
+  const hasQuestionPakets = Object.keys(questionCountByPaket).length > 0;
+
+  // Filter peserta secara KETAT sesuai pemetaan Sesi & Bank Soal:
+  // Hanya tampilkan peserta yang memang diplot ke sesi & paket soal yang valid,
+  // atau sudah memiliki submission / heartbeat aktif di sesi ini.
+  const rawTargetParts = participants.filter(function(p) {
+    const pId = String(p.participant_id || '').trim().toLowerCase();
+    const pUser = String(p.username || '').trim().toLowerCase();
+    const pSess = String(p.session_id || '').trim();
+    const pPaket = String(p.paket || '').trim();
+    const pPaketLower = pPaket.toLowerCase();
+
+    const hasLive = !!(proctorData[p.participant_id] || proctorData[pUser]);
+    const hasSubInSession = submissions.some(function(s) {
+      const sPid = String(s.participant_id || '').trim().toLowerCase();
+      return String(s.session_id) === String(targetSessionId) && (sPid === pId || sPid === pUser);
+    });
+
+    if (hasLive || hasSubInSession) return true;
+
+    const isMappedToSession = pSess === String(targetSessionId).trim();
+    const hasAssignedPaket = pPaket !== '' && pPaket !== '-';
+    const paketHasQuestions = !hasQuestionPakets || (questionCountByPaket[pPaketLower] > 0);
+
+    return isMappedToSession && hasAssignedPaket && paketHasQuestions;
+  });
 
   // Deduplikasi peserta unik berdasarkan username / identifier / ID agar total tetap sesuai jumlah asli (38)
   const uniquePartsMap = {};
@@ -2306,8 +2351,11 @@ function handleGetLiveProctor(payload) {
       }
     }
 
+    const pPaketKey = String(p.paket || 'Pretest').trim().toLowerCase();
+    const paketQuestionCount = questionCountByPaket[pPaketKey] || allQuestions.length || 25;
+
     const finalAnsweredCount = isSubmitted
-      ? (sub && sub.answers_json ? Object.keys(JSON.parse(sub.answers_json || '{}')).length || 25 : 25)
+      ? (sub && sub.answers_json ? Object.keys(JSON.parse(sub.answers_json || '{}')).length || paketQuestionCount : paketQuestionCount)
       : (live.answeredCount || 0);
 
     const finalViolations = Number(sub ? (sub.tab_switch_count !== undefined ? sub.tab_switch_count : sub.violations) : (live.violations || 0)) || 0;
@@ -2320,12 +2368,12 @@ function handleGetLiveProctor(payload) {
       gender: p.gender || 'Laki-Laki',
       kelas: p.kelas || 'Kelas A',
       institution: p.institution || '',
-      paket: p.paket || 'Pretest',
+      paket: p.paket || '-',
       start_time: p.start_time,
       status: status,
       is_online: isOnline,
       answered_count: finalAnsweredCount,
-      total_questions: live.totalQuestions || 25,
+      total_questions: live.totalQuestions || paketQuestionCount,
       violations: finalViolations,
       last_violation_msg: live.lastViolationMsg || '',
       last_heartbeat: live.lastHeartbeat || null,

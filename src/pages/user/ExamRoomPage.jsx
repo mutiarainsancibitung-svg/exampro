@@ -106,6 +106,10 @@ export const ExamRoomPage = () => {
   });
 
   const handleSubmit = async () => {
+    if (answeredCount < totalQuestions) {
+      alert(`Masih ada ${totalQuestions - answeredCount} soal yang belum terjawab. Anda wajib menjawab seluruh soal sebelum mengirim ujian.`);
+      return;
+    }
     try {
       setShowConfirmModal(false);
       await submitExam();
@@ -214,6 +218,8 @@ export const ExamRoomPage = () => {
               onAnswerChange={(val) => setAnswer(currentQuestion.question_id, val)}
               isFlagged={Boolean(flagged[currentQuestion.question_id])}
               onToggleFlag={() => toggleFlag(currentQuestion.question_id)}
+              fontSizeKey={fontSize}
+              onFontSizeChange={handleChangeFontSize}
               fontSizeClass={FONT_SIZE_PRESETS[fontSize]?.cls || 'text-base leading-relaxed'}
             />
 
@@ -316,7 +322,9 @@ export const ExamRoomPage = () => {
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600 leading-relaxed">
-            Apakah Anda yakin ingin mengumpulkan seluruh lembar jawaban sekarang?
+            {unAnsweredCount > 0
+              ? 'Ujian belum dapat dikirim karena masih terdapat soal yang belum terjawab. Silakan lengkapi seluruh soal terlebih dahulu.'
+              : 'Apakah Anda yakin ingin mengumpulkan seluruh lembar jawaban sekarang?'}
           </p>
 
           <div className="grid grid-cols-3 gap-2 p-3 bg-kemenag-50 rounded-2xl border border-kemenag-100 text-center">
@@ -329,15 +337,44 @@ export const ExamRoomPage = () => {
               <span className="text-[11px] text-slate-500">Ragu-ragu</span>
             </div>
             <div className="p-2">
-              <span className="block text-lg font-bold text-slate-400">{unAnsweredCount}</span>
+              <span className={`block text-lg font-bold ${unAnsweredCount > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                {unAnsweredCount}
+              </span>
               <span className="text-[11px] text-slate-500">Belum</span>
             </div>
           </div>
 
           {unAnsweredCount > 0 && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 text-amber-800 text-xs">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>Masih ada {unAnsweredCount} butir soal yang belum Anda jawab!</span>
+            <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2">
+              <div className="flex items-center gap-2 font-bold">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>Masih ada {unAnsweredCount} butir soal yang belum Anda jawab!</span>
+              </div>
+              <p className="text-[11px] text-rose-700">
+                Klik nomor soal di bawah ini untuk langsung menuju ke soal yang masih kosong:
+              </p>
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-1">
+                {questions.map((q, idx) => {
+                  const ans = answers[q.question_id];
+                  const isAns = Array.isArray(ans)
+                    ? ans.length > 0
+                    : Boolean(ans !== undefined && ans !== null && String(ans).trim() !== '');
+                  if (isAns) return null;
+                  return (
+                    <button
+                      key={q.question_id || idx}
+                      type="button"
+                      onClick={() => {
+                        setCurrentIndex(idx);
+                        setShowConfirmModal(false);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-rose-300 text-rose-700 font-bold text-[11px] hover:bg-rose-100 transition"
+                    >
+                      No. {idx + 1}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -348,15 +385,20 @@ export const ExamRoomPage = () => {
               onClick={() => setShowConfirmModal(false)}
               disabled={submitting}
             >
-              Cek Kembali
+              {unAnsweredCount > 0 ? 'Kembali ke Soal' : 'Cek Kembali'}
             </Button>
             <Button
               variant="primary"
               className="flex-1"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || unAnsweredCount > 0}
+              title={unAnsweredCount > 0 ? 'Semua soal wajib dijawab sebelum mengirim ujian' : 'Kirim seluruh jawaban'}
             >
-              {submitting ? 'Mengirim...' : 'Ya, Kumpulkan'}
+              {submitting
+                ? 'Mengirim...'
+                : unAnsweredCount > 0
+                  ? `Belum Lengkap (${unAnsweredCount})`
+                  : 'Ya, Kumpulkan'}
             </Button>
           </div>
         </div>

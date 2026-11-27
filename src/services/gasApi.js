@@ -148,6 +148,15 @@ export const gasApi = {
         throw new Error('Username atau Password salah! Pastikan data akun Anda sudah dibuat oleh Admin.');
       }
 
+      const cleanPaket = String(found.paket || '').trim();
+      if (!cleanPaket || cleanPaket === '-') {
+        throw new Error('Akun Anda belum dipetakan ke paket soal / sesi ujian oleh panitia. Silakan hubungi Pengawas atau Admin.');
+      }
+
+      if (found.session_id && !openSessions.some(s => s.session_id === found.session_id)) {
+        throw new Error('Mata ujian yang dijadwalkan untuk akun Anda sedang dinonaktifkan atau di luar rentang waktu pelaksanaan.');
+      }
+
       const targetSess = (found.session_id && openSessions.find(s => s.session_id === found.session_id)) || openSessions[0];
       const hasSubmitted = (db.submissions || []).some(
         s => s.session_id === targetSess.session_id &&
@@ -511,9 +520,33 @@ export const gasApi = {
       const proctorData = db.liveProctor || {};
       const nowEpoch = Date.now();
 
-      const rawParticipants = (db.participants || []).filter(
-        p => !p.session_id || p.session_id === targetSessionId
-      );
+      const allQ = db.questions || [];
+      const qCountByPaket = {};
+      allQ.forEach(q => {
+        const pkt = String(q.paket || 'Pretest').trim().toLowerCase();
+        qCountByPaket[pkt] = (qCountByPaket[pkt] || 0) + 1;
+      });
+      const hasQPakets = Object.keys(qCountByPaket).length > 0;
+
+      const rawParticipants = (db.participants || []).filter(p => {
+        const pId = String(p.participant_id || '').trim().toLowerCase();
+        const pUser = String(p.username || '').trim().toLowerCase();
+        const pSess = String(p.session_id || '').trim();
+        const pPaket = String(p.paket || '').trim();
+        const pPaketLower = pPaket.toLowerCase();
+
+        const hasLive = Boolean(proctorData[p.participant_id] || proctorData[pUser]);
+        const hasSub = (db.submissions || []).some(s => {
+          const sPid = String(s.participant_id || '').trim().toLowerCase();
+          return s.session_id === targetSessionId && (sPid === pId || sPid === pUser);
+        });
+        if (hasLive || hasSub) return true;
+
+        const isMapped = pSess === String(targetSessionId).trim();
+        const hasPaket = pPaket !== '' && pPaket !== '-';
+        const paketValid = !hasQPakets || (qCountByPaket[pPaketLower] > 0);
+        return isMapped && hasPaket && paketValid;
+      });
 
       // Deduplikasi peserta unik di mock mode
       const uniquePartsMap = new Map();
@@ -1132,7 +1165,7 @@ export const gasApi = {
         const pId = 'P-' + Date.now() + '-' + (++count);
         db.participants.push({
           participant_id: pId,
-          session_id: p.session_id || 'SES-001',
+          session_id: p.session_id !== undefined ? p.session_id : '',
           username: p.username || '',
           password: p.password || 'kemenag2026',
           full_name: p.full_name || p.username || '',
@@ -1141,6 +1174,8 @@ export const gasApi = {
           kelas: p.kelas || '-',
           institution: p.institution || '',
           paket: p.paket || '-',
+          token_used: p.token_used || '',
+          start_time: p.start_time || '',
           status: 'registered'
         });
       }
