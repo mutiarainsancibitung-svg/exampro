@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '../ui/Card';
 import { OptionItem } from './OptionItem';
-import { Flag, ZoomIn, X, Type } from 'lucide-react';
-
-const FONT_SIZE_PX_MAP = {
-  sm: '14px',
-  base: '16px',
-  lg: '18px',
-  xl: '20px'
-};
+import { Flag, ZoomIn, X, Type, ArrowDown, ArrowUp } from 'lucide-react';
 
 export const QuestionCard = ({
   questionNumber,
@@ -17,15 +10,17 @@ export const QuestionCard = ({
   onAnswerChange,
   isFlagged,
   onToggleFlag,
-  fontSizeKey = 'base',
-  onFontSizeChange,
-  fontSizeClass = 'text-base leading-relaxed'
+  fontSizePx = 16,
+  minFontSize = 14,
+  maxFontSize = 28,
+  onDecreaseFont,
+  onIncreaseFont
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
 
   if (!question) return null;
 
-  const fontSizePx = FONT_SIZE_PX_MAP[fontSizeKey] || '16px';
+  const resolvedFontSize = `${fontSizePx}px`;
 
   const typeLabels = {
     single_choice: 'Pilihan Ganda Tunggal',
@@ -64,29 +59,36 @@ export const QuestionCard = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {onFontSizeChange && (
-            <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl px-2 py-1">
+          {(onDecreaseFont || onIncreaseFont) && (
+            <div
+              className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl px-2 py-1"
+              title="Atur ukuran font soal & pilihan jawaban"
+            >
               <Type className="w-3.5 h-3.5 text-kemenag-600 mr-0.5" />
-              <span className="text-[11px] font-semibold text-slate-500 mr-1">Ukuran Teks:</span>
-              {[
-                { key: 'sm', label: 'A-' },
-                { key: 'base', label: 'A' },
-                { key: 'lg', label: 'A+' },
-                { key: 'xl', label: 'A++' }
-              ].map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => onFontSizeChange(opt.key)}
-                  className={`px-2 py-0.5 rounded-xl text-[11px] font-bold transition ${
-                    fontSizeKey === opt.key
-                      ? 'bg-kemenag-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-white hover:text-kemenag-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+              <span className="text-[11px] font-semibold text-slate-600 hidden sm:inline mr-1">Ukuran Font:</span>
+              <button
+                type="button"
+                onClick={onDecreaseFont}
+                disabled={fontSizePx <= minFontSize}
+                title="Perkecil ukuran font"
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-kemenag-50 hover:text-kemenag-700 hover:border-kemenag-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ArrowDown className="w-3 h-3" />
+                A-
+              </button>
+              <span className="px-2 text-[11px] font-bold text-slate-700 tabular-nums">
+                {fontSizePx}px
+              </span>
+              <button
+                type="button"
+                onClick={onIncreaseFont}
+                disabled={fontSizePx >= maxFontSize}
+                title="Perbesar ukuran font"
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-kemenag-50 hover:text-kemenag-700 hover:border-kemenag-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ArrowUp className="w-3 h-3" />
+                A+
+              </button>
             </div>
           )}
 
@@ -106,11 +108,11 @@ export const QuestionCard = ({
         </div>
       </div>
 
-      {/* Teks Soal & Media Gambar (Ukuran Font Seragam dengan Pilihan Jawaban) */}
+      {/* Teks Soal & Media Gambar (Ukuran Font Seragam Persis dengan Pilihan Jawaban) */}
       <div className="space-y-4">
         <p
-          style={{ fontSize: fontSizePx, lineHeight: '1.65' }}
-          className={`text-slate-800 ${fontSizeClass} font-normal whitespace-pre-line no-select`}
+          style={{ fontSize: resolvedFontSize, lineHeight: '1.65' }}
+          className="text-slate-800 font-normal whitespace-pre-line no-select"
         >
           {question.question_text && !['single_choice', 'multiple_choice', 'essay'].includes(String(question.question_text).trim())
             ? question.question_text
@@ -147,8 +149,7 @@ export const QuestionCard = ({
                   displayLabel={displayLabel}
                   type="single_choice"
                   isSelected={userAnswer === opt.id}
-                  fontSizeClass={fontSizeClass}
-                  fontSizePx={fontSizePx}
+                  fontSizePx={resolvedFontSize}
                   onSelect={() => handleSingleSelect(opt.id)}
                 />
               );
@@ -169,8 +170,7 @@ export const QuestionCard = ({
                   displayLabel={displayLabel}
                   type="multiple_choice"
                   isSelected={isSelected}
-                  fontSizeClass={fontSizeClass}
-                  fontSizePx={fontSizePx}
+                  fontSizePx={resolvedFontSize}
                   onSelect={() => handleMultipleSelect(opt.id)}
                 />
               );
@@ -188,8 +188,8 @@ export const QuestionCard = ({
               value={userAnswer || ''}
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder="Tulis jawaban lengkap Anda di sini..."
-              style={{ fontSize: fontSizePx, lineHeight: '1.65' }}
-              className={`w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 ${fontSizeClass} text-slate-800 transition resize-y font-normal`}
+              style={{ fontSize: resolvedFontSize, lineHeight: '1.65' }}
+              className="w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 text-slate-800 transition resize-y font-normal"
             />
             <p className="text-right text-xs text-slate-400">
               {(userAnswer || '').length} karakter

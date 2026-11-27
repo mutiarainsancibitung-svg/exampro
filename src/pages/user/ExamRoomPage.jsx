@@ -12,14 +12,12 @@ import { ViolationModal } from '../../components/exam/ViolationModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type, ArrowDown, ArrowUp, Lock } from 'lucide-react';
 
-const FONT_SIZE_PRESETS = {
-  sm: { key: 'sm', label: 'A-', title: 'Ukuran Huruf Kecil', cls: 'text-sm leading-relaxed' },
-  base: { key: 'base', label: 'A', title: 'Ukuran Huruf Standar', cls: 'text-base leading-relaxed' },
-  lg: { key: 'lg', label: 'A+', title: 'Ukuran Huruf Besar', cls: 'text-lg leading-relaxed' },
-  xl: { key: 'xl', label: 'A++', title: 'Ukuran Huruf Ekstra Besar', cls: 'text-xl leading-relaxed' }
-};
+const MIN_FONT_SIZE = 14;
+const MAX_FONT_SIZE = 28;
+const DEFAULT_FONT_SIZE = 16;
+const FONT_STEP = 2;
 
 export const ExamRoomPage = () => {
   const navigate = useNavigate();
@@ -48,15 +46,22 @@ export const ExamRoomPage = () => {
   } = useExam();
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [fontSize, setFontSize] = useState(() => {
-    const saved = localStorage.getItem('exampro_font_size');
-    return FONT_SIZE_PRESETS[saved] ? saved : 'base';
+  const [fontSizePx, setFontSizePx] = useState(() => {
+    const saved = Number(localStorage.getItem('exampro_font_size_px'));
+    if (!Number.isNaN(saved) && saved >= MIN_FONT_SIZE && saved <= MAX_FONT_SIZE) {
+      return saved;
+    }
+    return DEFAULT_FONT_SIZE;
   });
 
-  const handleChangeFontSize = (sizeKey) => {
-    setFontSize(sizeKey);
-    localStorage.setItem('exampro_font_size', sizeKey);
+  const updateFontSize = (nextSize) => {
+    const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, nextSize));
+    setFontSizePx(clamped);
+    localStorage.setItem('exampro_font_size_px', String(clamped));
   };
+
+  const handleDecreaseFont = () => updateFontSize(fontSizePx - FONT_STEP);
+  const handleIncreaseFont = () => updateFontSize(fontSizePx + FONT_STEP);
 
   // Proteksi rute & auto-exit jika sesi dinonaktifkan pengawas
   useEffect(() => {
@@ -88,7 +93,7 @@ export const ExamRoomPage = () => {
   // Handler Waktu Habis: langsung simpan otomatis semua jawaban
   const handleTimeUp = async () => {
     try {
-      await submitExam();
+      await submitExam({ allowIncomplete: true });
       navigate('/result');
     } catch (err) {
       alert('Waktu ujian telah habis. Lembar jawaban Anda telah tersimpan secara otomatis.');
@@ -162,30 +167,38 @@ export const ExamRoomPage = () => {
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-            {/* Pengatur Variasi Ukuran Font Soal & Pilihan Jawaban */}
+            {/* Pengatur Ukuran Font Up & Down (Seragam Soal & Pilihan Jawaban) */}
             <div
               className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl p-1"
-              title="Sesuaikan ukuran teks soal & pilihan jawaban"
+              title="Naik/turunkan ukuran font soal & pilihan jawaban"
             >
               <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 px-1.5">
                 <Type className="w-3.5 h-3.5 text-kemenag-600" />
                 Font:
               </span>
-              {Object.values(FONT_SIZE_PRESETS).map((preset) => (
-                <button
-                  key={preset.key}
-                  type="button"
-                  onClick={() => handleChangeFontSize(preset.key)}
-                  title={preset.title}
-                  className={`px-2 py-1 rounded-xl text-[11px] font-bold transition ${
-                    fontSize === preset.key
-                      ? 'bg-kemenag-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-white hover:text-kemenag-700'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={handleDecreaseFont}
+                disabled={fontSizePx <= MIN_FONT_SIZE}
+                title="Perkecil ukuran font"
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-kemenag-50 hover:text-kemenag-700 hover:border-kemenag-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ArrowDown className="w-3 h-3" />
+                A-
+              </button>
+              <span className="px-1.5 text-[11px] font-bold text-slate-700 tabular-nums">
+                {fontSizePx}px
+              </span>
+              <button
+                type="button"
+                onClick={handleIncreaseFont}
+                disabled={fontSizePx >= MAX_FONT_SIZE}
+                title="Perbesar ukuran font"
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-kemenag-50 hover:text-kemenag-700 hover:border-kemenag-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ArrowUp className="w-3 h-3" />
+                A+
+              </button>
             </div>
 
             <button
@@ -218,9 +231,11 @@ export const ExamRoomPage = () => {
               onAnswerChange={(val) => setAnswer(currentQuestion.question_id, val)}
               isFlagged={Boolean(flagged[currentQuestion.question_id])}
               onToggleFlag={() => toggleFlag(currentQuestion.question_id)}
-              fontSizeKey={fontSize}
-              onFontSizeChange={handleChangeFontSize}
-              fontSizeClass={FONT_SIZE_PRESETS[fontSize]?.cls || 'text-base leading-relaxed'}
+              fontSizePx={fontSizePx}
+              minFontSize={MIN_FONT_SIZE}
+              maxFontSize={MAX_FONT_SIZE}
+              onDecreaseFont={handleDecreaseFont}
+              onIncreaseFont={handleIncreaseFont}
             />
 
             {/* Navigasi Bawah Soal */}
@@ -244,11 +259,19 @@ export const ExamRoomPage = () => {
                 </Button>
               ) : (
                 <Button
-                  variant="success"
+                  variant={unAnsweredCount > 0 ? 'secondary' : 'success'}
                   onClick={() => setShowConfirmModal(true)}
-                  icon={Send}
+                  disabled={unAnsweredCount > 0 || submitting}
+                  title={
+                    unAnsweredCount > 0
+                      ? `Masih ada ${unAnsweredCount} soal belum dijawab. Semua soal harus diisi.`
+                      : 'Kumpulkan seluruh lembar jawaban'
+                  }
+                  icon={unAnsweredCount > 0 ? Lock : Send}
                 >
-                  Selesai & Kumpulkan
+                  {unAnsweredCount > 0
+                    ? `Selesai (${answeredCount}/${totalQuestions})`
+                    : 'Selesai & Kumpulkan'}
                 </Button>
               )}
             </div>
@@ -266,12 +289,34 @@ export const ExamRoomPage = () => {
 
             <Button
               variant="outline"
-              className="w-full border-rose-200 text-rose-600 hover:bg-rose-50 rounded-2xl"
+              className={`w-full rounded-2xl ${
+                unAnsweredCount > 0
+                  ? 'border-slate-200 text-slate-400 bg-slate-50 cursor-not-allowed'
+                  : 'border-rose-200 text-rose-600 hover:bg-rose-50'
+              }`}
               onClick={() => setShowConfirmModal(true)}
-              icon={Send}
+              disabled={unAnsweredCount > 0 || submitting}
+              title={
+                unAnsweredCount > 0
+                  ? `Semua soal (${totalQuestions}) harus dijawab sebelum mengirim ujian`
+                  : 'Kumpulkan lembar jawaban'
+              }
+              icon={unAnsweredCount > 0 ? Lock : Send}
             >
-              Kumpulkan Ujian
+              {unAnsweredCount > 0
+                ? `Kumpulkan Ujian (${answeredCount}/${totalQuestions})`
+                : 'Kumpulkan Ujian'}
             </Button>
+
+            {unAnsweredCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(true)}
+                className="w-full p-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold hover:bg-amber-100 transition text-center"
+              >
+                Wajib jawab semua soal. Cek {unAnsweredCount} nomor kosong →
+              </button>
+            )}
           </div>
         </div>
       </main>

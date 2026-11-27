@@ -112,19 +112,31 @@ export const ExamProvider = ({ children }) => {
   };
 
   // Submit Ujian (selalu membaca jawaban terbaru via ref & fallback localStorage)
-  const submitExam = useCallback(async () => {
+  const submitExam = useCallback(async ({ allowIncomplete = false } = {}) => {
     if (!participant || !sessionData || submittingRef.current) return;
+
+    let latestAnswers = answersRef.current || {};
+    if (storageKey && Object.keys(latestAnswers).length === 0) {
+      try {
+        const fromStorage = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        if (Object.keys(fromStorage).length > 0) latestAnswers = fromStorage;
+      } catch (e) {}
+    }
+
+    if (!allowIncomplete && questions.length > 0) {
+      const answeredCount = questions.filter((q) => {
+        const val = latestAnswers[q.question_id];
+        if (Array.isArray(val)) return val.length > 0;
+        return val !== undefined && val !== null && String(val).trim() !== '';
+      }).length;
+      if (answeredCount < questions.length) {
+        throw new Error(`Masih ada ${questions.length - answeredCount} soal yang belum terjawab. Semua soal wajib dijawab sebelum mengirim ujian.`);
+      }
+    }
+
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      let latestAnswers = answersRef.current || {};
-      if (storageKey && Object.keys(latestAnswers).length === 0) {
-        try {
-          const fromStorage = JSON.parse(localStorage.getItem(storageKey) || '{}');
-          if (Object.keys(fromStorage).length > 0) latestAnswers = fromStorage;
-        } catch (e) {}
-      }
-
       const res = await gasApi.submitExam({
         participantId: participant.participantId,
         sessionId: sessionData.session_id,
@@ -145,7 +157,7 @@ export const ExamProvider = ({ children }) => {
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [participant, sessionData, storageKey, flagStorageKey]);
+  }, [participant, sessionData, storageKey, flagStorageKey, questions]);
 
   // Kirim Heartbeat & Auto-Save Jawaban Sementara ke Google Apps Script (RAM Cache)
   const sendHeartbeat = useCallback(async (customViolations, violationMsg) => {
@@ -183,7 +195,7 @@ export const ExamProvider = ({ children }) => {
           setProctorMessage(res.pendingCommand.message || 'Peringatan dari Pengawas: Harap tetap fokus pada lembar ujian!');
         } else if (res.pendingCommand.actionType === 'force_submit') {
           alert('Ujian Anda telah dihentikan dan dikumpulkan secara otomatis oleh Pengawas Ujian.');
-          await submitExam();
+          await submitExam({ allowIncomplete: true });
         }
       }
     } catch (e) {
