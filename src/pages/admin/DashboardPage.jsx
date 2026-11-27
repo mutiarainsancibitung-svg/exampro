@@ -7,7 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database, RotateCw } from 'lucide-react';
+import { Plus, Users, BookOpen, CheckCircle2, FileText, ToggleLeft, ToggleRight, Wrench, Check, Database, RotateCw, StopCircle } from 'lucide-react';
 
 export const DashboardPage = () => {
   const { adminSecretKey, isAdminLoggedIn } = useAuth();
@@ -19,6 +19,7 @@ export const DashboardPage = () => {
   const [repairing, setRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState(null);
   const [showRepairModal, setShowRepairModal] = useState(false);
+  const [endingSessionId, setEndingSessionId] = useState('');
   const [sessionForm, setSessionForm] = useState({
     title: '',
     type: 'pretest',
@@ -118,6 +119,24 @@ export const DashboardPage = () => {
       loadDashboard(true);
     } catch (err) {
       alert('Gagal mengubah status sesi: ' + err.message);
+    }
+  };
+
+  const handleEndSession = async (sess) => {
+    const ok = window.confirm(
+      `AKHIRI SESI "${sess.title}" SEKARANG?\n\n` +
+      `Seluruh ujian peserta yang sedang berlangsung akan langsung diakhiri & dikumpulkan otomatis, sesi ditutup, dan peserta dikeluarkan.`
+    );
+    if (!ok) return;
+    setEndingSessionId(sess.session_id);
+    try {
+      const res = await gasApi.endSession(adminSecretKey, sess.session_id);
+      alert(res.message || 'Sesi dan seluruh ujian peserta berhasil diakhiri.');
+      loadDashboard(true);
+    } catch (err) {
+      alert('Gagal mengakhiri sesi: ' + err.message);
+    } finally {
+      setEndingSessionId('');
     }
   };
 
@@ -236,16 +255,20 @@ export const DashboardPage = () => {
                   </span>
                   <button
                     onClick={() => handleToggleSession(sess)}
-                    className="text-xs font-semibold flex items-center gap-1.5 transition"
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 border transition ${
+                      sess.is_active
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                        : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                    }`}
                   >
                     {sess.is_active ? (
-                      <span className="text-kemenag-600 flex items-center gap-1">
-                        <ToggleRight className="w-5 h-5" /> Aktif
-                      </span>
+                      <>
+                        <ToggleRight className="w-4 h-4 text-emerald-600" /> Dibuka
+                      </>
                     ) : (
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <ToggleLeft className="w-5 h-5" /> Ditutup
-                      </span>
+                      <>
+                        <ToggleLeft className="w-4 h-4 text-slate-400" /> Ditutup
+                      </>
                     )}
                   </button>
                 </div>
@@ -267,9 +290,22 @@ export const DashboardPage = () => {
                   )}
                 </div>
 
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                  <span>Skor: <strong>{sess.show_score ? 'Muncul' : 'Sembunyi'}</strong></span>
-                  <span>Acak Soal: <strong>{sess.shuffle_questions ? 'Ya' : 'Tidak'}</strong></span>
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <span>Skor: <strong>{sess.show_score ? 'Muncul' : 'Sembunyi'}</strong></span>
+                    <span>•</span>
+                    <span>Acak: <strong>{sess.shuffle_questions ? 'Ya' : 'Tidak'}</strong></span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleEndSession(sess)}
+                    disabled={endingSessionId === sess.session_id}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition disabled:opacity-50"
+                    title="Akhiri sesi dan semua ujian yang sedang berlangsung"
+                  >
+                    <StopCircle className="w-3.5 h-3.5 text-rose-600" />
+                    {endingSessionId === sess.session_id ? 'Mengakhiri...' : 'Akhiri Sesi'}
+                  </button>
                 </div>
               </Card>
             ))}

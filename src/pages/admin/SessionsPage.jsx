@@ -29,7 +29,8 @@ import {
   Download,
   Shuffle,
   Eye,
-  Sliders
+  Sliders,
+  StopCircle
 } from 'lucide-react';
 
 export const SessionsPage = () => {
@@ -88,11 +89,12 @@ export const SessionsPage = () => {
     });
   };
 
-  // State Hapus Sesi & Auto-Backup Proteksi
+  // State Hapus Sesi & Auto-Backup Proteksi + Akhiri Sesi
   const [sessionToDelete, setSessionToDelete] = useState(null);
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false);
   const [deletingSessionLoading, setDeletingSessionLoading] = useState(false);
   const [confirmDeleteChecked, setConfirmDeleteChecked] = useState(false);
+  const [endingSessionId, setEndingSessionId] = useState('');
 
   useEffect(() => {
     if (!isAdminLoggedIn) {
@@ -144,6 +146,30 @@ export const SessionsPage = () => {
       loadData(true);
     } catch (err) {
       alert('Gagal mengubah status: ' + err.message);
+    }
+  };
+
+  // Akhiri Sesi Secara Menyeluruh (Mengakhiri Semua Ujian Peserta & Menutup Sesi)
+  const handleEndSession = async (sess) => {
+    const ok = window.confirm(
+      `AKHIRI SESI "${sess.title}" SEKARANG?\n\n` +
+      `Tindakan ini akan:\n` +
+      `1. Langsung MENGAKHIRI & MENGUMPULKAN seluruh ujian peserta yang sedang mengerjakan saat ini secara otomatis.\n` +
+      `2. Menghitung nilai PG sementara & menyimpannya ke Rekap Nilai.\n` +
+      `3. Menutup sesi (Ditutup) dan mengeluarkan peserta dari ruang ujian.\n\n` +
+      `Lanjutkan akhiri seluruh ujian pada sesi ini?`
+    );
+    if (!ok) return;
+
+    setEndingSessionId(sess.session_id);
+    try {
+      const res = await gasApi.endSession(adminSecretKey, sess.session_id);
+      alert(res.message || 'Sesi dan seluruh ujian berhasil diakhiri.');
+      loadData(true);
+    } catch (err) {
+      alert('Gagal mengakhiri sesi: ' + err.message);
+    } finally {
+      setEndingSessionId('');
     }
   };
 
@@ -289,7 +315,7 @@ export const SessionsPage = () => {
 
   if (loading) {
     return (
-      <AdminLayout title="Data Mata Ujian / Kegiatan (Sub Menu 2)">
+      <AdminLayout title="Data Mata Ujian / Kegiatan (Sub Menu 1)">
         <LoadingScreen
           message="Memuat Data Mata Ujian CBT..."
           submessage="Sedang mengambil data sesi evaluasi, durasi pengerjaan, dan token masuk..."
@@ -299,17 +325,17 @@ export const SessionsPage = () => {
   }
 
   return (
-    <AdminLayout title="Data Mata Ujian / Kegiatan (Sub Menu 2)">
+    <AdminLayout title="Data Mata Ujian / Kegiatan (Sub Menu 1)">
       <div className="space-y-6">
         {/* Navigasi Sub Menu 3-Laman */}
-        <ExamSubNav active={2} />
+        <ExamSubNav active={1} />
 
-        {/* Header Bar Sub Menu 2 */}
+        {/* Header Bar Sub Menu 1 */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-kemenag-700 bg-kemenag-50 px-2.5 py-1 rounded-xl border border-kemenag-200">
-                Sub Menu 2
+                Langkah 1
               </span>
               <h3 className="font-extrabold text-slate-800 text-base">
                 Data Mata Ujian & Kegiatan CBT
@@ -445,21 +471,27 @@ export const SessionsPage = () => {
                         {sess.type || 'Pretest'}
                       </span>
 
-                      <button
-                        onClick={() => handleToggleStatus(sess)}
-                        title={sess.is_active ? 'Klik untuk menutup ujian' : 'Klik untuk mengaktifkan ujian'}
-                        className="text-xs font-semibold flex items-center gap-1.5 transition"
-                      >
-                        {sess.is_active ? (
-                          <span className="text-kemenag-700 flex items-center gap-1 font-bold">
-                            <ToggleRight className="w-5 h-5 text-kemenag-600" /> Aktif
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 flex items-center gap-1 font-medium">
-                            <ToggleLeft className="w-5 h-5" /> Ditutup
-                          </span>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleToggleStatus(sess)}
+                          title={sess.is_active ? 'Klik untuk menutup ujian' : 'Klik untuk membuka ujian'}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 border transition ${
+                            sess.is_active
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                              : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          {sess.is_active ? (
+                            <>
+                              <ToggleRight className="w-4 h-4 text-emerald-600" /> Dibuka
+                            </>
+                          ) : (
+                            <>
+                              <ToggleLeft className="w-4 h-4 text-slate-400" /> Ditutup
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Judul Mata Ujian */}
@@ -535,32 +567,46 @@ export const SessionsPage = () => {
                   </div>
 
                   {/* Tombol Aksi di Bawah Kartu */}
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <button
-                      onClick={() => navigate('/admin/exam-setup')}
-                      className="text-kemenag-700 font-bold hover:underline flex items-center gap-1 text-[11px]"
-                      title="Buka Sub Menu 1 untuk memetakan mata ujian ini ke kelas"
-                    >
-                      <Sliders className="w-3.5 h-3.5" />
-                      Atur Pemetaan Kelas &rarr;
-                    </button>
-
-                    <div className="flex items-center gap-2">
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
                       <button
+                        type="button"
+                        onClick={() => handleEndSession(sess)}
+                        disabled={endingSessionId === sess.session_id}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition disabled:opacity-50"
+                        title="Akhiri sesi & kumpulkan otomatis seluruh ujian peserta yang sedang berlangsung"
+                      >
+                        <StopCircle className="w-3.5 h-3.5 text-rose-600" />
+                        {endingSessionId === sess.session_id ? 'Mengakhiri...' : 'Akhiri Sesi'}
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => handleOpenEdit(sess)}
-                        className="text-slate-600 hover:text-slate-900 font-semibold p-1.5 rounded-lg hover:bg-slate-100"
+                        className="text-slate-600 hover:text-slate-900 font-semibold p-1.5 rounded-xl border border-slate-200 hover:bg-slate-100"
                         title="Edit detail mata ujian"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleRequestDelete(sess)}
-                        className="text-rose-600 hover:text-rose-800 font-semibold p-1.5 rounded-lg hover:bg-rose-50"
+                        className="text-rose-600 hover:text-rose-800 font-semibold p-1.5 rounded-xl border border-rose-200 hover:bg-rose-50"
                         title="Hapus mata ujian"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate('/admin/exam-setup')}
+                      className="w-full text-kemenag-700 font-bold hover:underline flex items-center justify-center gap-1 text-[11px] py-1 rounded-xl bg-kemenag-50/60 hover:bg-kemenag-50"
+                      title="Buka Langkah 3 untuk memetakan paket soal & peserta"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                      Atur Ujian & Pemetaan (Langkah 3) &rarr;
+                    </button>
                   </div>
                 </Card>
               );

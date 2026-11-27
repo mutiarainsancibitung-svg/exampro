@@ -29,7 +29,9 @@ import {
   Sparkles,
   Lock,
   Grid,
-  List
+  List,
+  PowerOff,
+  Calendar
 } from 'lucide-react';
 
 export const LiveMonitorPage = () => {
@@ -102,6 +104,9 @@ export const LiveMonitorPage = () => {
       const res = await gasApi.getLiveProctor(adminSecretKey, sId);
       if (res.status === 'success') {
         setProctorData(res);
+        if (res.session && res.session.session_id) {
+          setSessions(prev => prev.map(s => (s.session_id === res.session.session_id ? { ...s, ...res.session } : s)));
+        }
 
         // Deteksi jika ada penambahan pelanggaran baru (alarm visual)
         const totalViolations = (res.participants || []).reduce(
@@ -139,9 +144,12 @@ export const LiveMonitorPage = () => {
     fetchProctorData(newSessionId);
   };
 
-  // Timer Countdown Auto-Refresh
+  const activeSessionObj = sessions.find(s => s.session_id === selectedSessionId) || proctorData?.session;
+  const isCurrentSessionActive = Boolean(activeSessionObj?.is_active) && proctorData?.sessionActive !== false;
+
+  // Timer Countdown Auto-Refresh (hanya berjalan jika sesi aktif; jika sesi mati -> live monitor mati)
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || !isCurrentSessionActive) return;
 
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -154,7 +162,7 @@ export const LiveMonitorPage = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [autoRefresh, refreshIntervalSec, fetchProctorData]);
+  }, [autoRefresh, isCurrentSessionActive, refreshIntervalSec, fetchProctorData]);
 
   // Handler Kirim Peringatan / Tindakan Pengawas
   const handleSendWarning = async (e) => {
@@ -213,13 +221,16 @@ export const LiveMonitorPage = () => {
     );
   }
 
-  const rawParticipants = proctorData?.participants || [];
-  const currentSession = sessions.find(s => s.session_id === selectedSessionId) || proctorData?.session;
+  const rawParticipants = isCurrentSessionActive ? (proctorData?.participants || []) : [];
+  const currentSession = activeSessionObj;
 
-  // Deduplikasi peserta unik berdasarkan username / identifier / ID
-  // Memastikan total peserta tetap 38 dan tidak ada nama ganda di monitor
+  // Deduplikasi peserta unik + pastikan hanya peserta yang sudah mendapat paket soal yang muncul
   const uniqueParticipantsMap = new Map();
   rawParticipants.forEach(p => {
+    const pkt = String(p.paket || '').trim();
+    if (!pkt || pkt === '-' || pkt.toLowerCase() === 'null' || pkt.toLowerCase() === 'undefined') {
+      return;
+    }
     const key = String(p.username || p.identifier || p.participant_id || '').trim().toLowerCase();
     if (!key) return;
     if (!uniqueParticipantsMap.has(key)) {
@@ -272,26 +283,43 @@ export const LiveMonitorPage = () => {
         {/* Toolbar Header Pengawasan */}
         <div className="bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-sm shrink-0">
-              <Radio className="w-5 h-5 animate-pulse" />
+            <div className={`w-10 h-10 rounded-2xl text-white flex items-center justify-center shadow-sm shrink-0 ${
+              isCurrentSessionActive ? 'bg-emerald-600' : 'bg-slate-400'
+            }`}>
+              {isCurrentSessionActive ? (
+                <Radio className="w-5 h-5 animate-pulse" />
+              ) : (
+                <PowerOff className="w-5 h-5" />
+              )}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-extrabold text-slate-800 text-sm">Pilih Sesi Ujian yang Dipantau:</h3>
-                <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  Live Monitoring
-                </span>
+                {isCurrentSessionActive ? (
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                    Live Monitoring Aktif
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                    <PowerOff className="w-3 h-3 text-rose-600" />
+                    Sesi Mati (Live Monitor Nonaktif)
+                  </span>
+                )}
               </div>
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
                 <select
                   value={selectedSessionId}
                   onChange={(e) => handleSessionChange(e.target.value)}
-                  className="px-3.5 py-1.5 rounded-xl border border-emerald-300 text-xs font-bold text-emerald-950 bg-emerald-50/50 focus:outline-none"
+                  className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold focus:outline-none ${
+                    isCurrentSessionActive
+                      ? 'border-emerald-300 text-emerald-950 bg-emerald-50/50'
+                      : 'border-slate-300 text-slate-700 bg-slate-100'
+                  }`}
                 >
                   {sessions.map(s => (
                     <option key={s.session_id} value={s.session_id}>
-                      {s.title} ({s.type?.toUpperCase()} - Token: {s.token})
+                      [{s.is_active ? 'Dibuka' : 'Ditutup'}] {s.title} ({s.type?.toUpperCase()} - Token: {s.token})
                     </option>
                   ))}
                 </select>
@@ -305,44 +333,48 @@ export const LiveMonitorPage = () => {
 
           {/* Kontrol Auto-Refresh & Tombol Segarkan */}
           <div className="flex items-center gap-2.5 self-end lg:self-center">
-            {/* Toggle Pause / Resume */}
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`px-3 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 border ${
-                autoRefresh
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-              }`}
-              title={autoRefresh ? 'Jeda pembaruan otomatis' : 'Lanjutkan pembaruan otomatis'}
-            >
-              {autoRefresh ? (
-                <>
-                  <Pause className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Auto ({countdown}s)</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Dijeda</span>
-                </>
-              )}
-            </button>
+            {isCurrentSessionActive && (
+              <>
+                {/* Toggle Pause / Resume */}
+                <button
+                  onClick={() => setAutoRefresh(!autoRefresh)}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                    autoRefresh
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                  }`}
+                  title={autoRefresh ? 'Jeda pembaruan otomatis' : 'Lanjutkan pembaruan otomatis'}
+                >
+                  {autoRefresh ? (
+                    <>
+                      <Pause className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Auto ({countdown}s)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Dijeda</span>
+                    </>
+                  )}
+                </button>
 
-            {/* Pilihan Interval Refresh */}
-            <select
-              value={refreshIntervalSec}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setRefreshIntervalSec(val);
-                setCountdown(val);
-              }}
-              className="px-2.5 py-2 rounded-2xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50 focus:outline-none"
-            >
-              <option value={5}>Setiap 5 detik</option>
-              <option value={10}>Setiap 10 detik</option>
-              <option value={20}>Setiap 20 detik</option>
-              <option value={30}>Setiap 30 detik</option>
-            </select>
+                {/* Pilihan Interval Refresh */}
+                <select
+                  value={refreshIntervalSec}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setRefreshIntervalSec(val);
+                    setCountdown(val);
+                  }}
+                  className="px-2.5 py-2 rounded-2xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50 focus:outline-none"
+                >
+                  <option value={5}>Setiap 5 detik</option>
+                  <option value={10}>Setiap 10 detik</option>
+                  <option value={20}>Setiap 20 detik</option>
+                  <option value={30}>Setiap 30 detik</option>
+                </select>
+              </>
+            )}
 
             {/* Tombol Refresh Manual */}
             <Button
@@ -352,7 +384,7 @@ export const LiveMonitorPage = () => {
               loading={refreshing}
               onClick={() => {
                 setCountdown(refreshIntervalSec);
-                fetchProctorData();
+                loadInitialSessions();
               }}
               className="border-slate-200 text-slate-700 hover:bg-slate-100"
             >
@@ -360,6 +392,45 @@ export const LiveMonitorPage = () => {
             </Button>
           </div>
         </div>
+
+        {/* Jika Sesi Mati / Dinonaktifkan -> Live Monitor Berhenti */}
+        {!isCurrentSessionActive ? (
+          <Card className="p-10 text-center bg-white rounded-3xl border border-rose-200 shadow-sm space-y-4">
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-rose-50 border border-rose-200 text-rose-500 flex items-center justify-center">
+              <PowerOff className="w-8 h-8" />
+            </div>
+            <div className="max-w-lg mx-auto space-y-1.5">
+              <h3 className="text-base font-extrabold text-slate-800">
+                Live Monitor Mati — Sesi Ujian Sedang Ditutup
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Mata ujian <strong>"{currentSession?.title || 'Terpilih'}"</strong> saat ini dalam status{' '}
+                <strong className="text-rose-700">Ditutup / Nonaktif</strong>, sehingga pemantauan live dan pelacakan peserta otomatis dimatikan.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Calendar}
+                onClick={() => navigate('/admin/sessions')}
+                className="border-kemenag-200 text-kemenag-800 hover:bg-kemenag-50"
+              >
+                Kelola Status Sesi di Data Mata Ujian
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={RefreshCw}
+                loading={refreshing}
+                onClick={() => loadInitialSessions()}
+              >
+                Cek Status Terbaru
+              </Button>
+            </div>
+          </Card>
+        ) : (
+        <>
 
         {/* 4 Kartu KPI Statistik Pengawasan */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -446,7 +517,7 @@ export const LiveMonitorPage = () => {
               onChange={(e) => setFilterStatus(e.target.value)}
               className="px-3 py-2 rounded-2xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50 focus:outline-none"
             >
-              <option value="ALL">Semua Status ({rawParticipants.length})</option>
+              <option value="ALL">Semua Status ({participants.length})</option>
               <option value="in_progress">Sedang Mengerjakan ({countInProgress})</option>
               <option value="submitted">Sudah Selesai ({countSubmitted})</option>
               <option value="violation">Ada Pelanggaran ({countViolations})</option>
@@ -488,8 +559,8 @@ export const LiveMonitorPage = () => {
         {filteredParticipants.length === 0 ? (
           <Card className="p-12 text-center text-slate-400 text-sm bg-white rounded-3xl border border-kemenag-100">
             <Radio className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-            <p className="font-bold text-slate-600">Tidak ada data peserta yang cocok dengan kriteria filter.</p>
-            <p className="text-xs text-slate-400 mt-1">Coba sesuaikan kata kunci pencarian atau ganti sesi ujian aktif.</p>
+            <p className="font-bold text-slate-600">Tidak ada peserta yang mendapatkan paket soal pada sesi ini.</p>
+            <p className="text-xs text-slate-400 mt-1">Hanya peserta yang sudah dipetakan dengan paket soal valid di "Atur Ujian & Pemetaan" yang tampil di Live Monitor.</p>
           </Card>
         ) : viewMode === 'grid' ? (
           /* TAMPILAN GRID KARTU */
@@ -744,6 +815,8 @@ export const LiveMonitorPage = () => {
               </table>
             </div>
           </div>
+        )}
+        </>
         )}
 
       </div>

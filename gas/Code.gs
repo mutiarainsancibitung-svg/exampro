@@ -93,8 +93,14 @@ function doPost(e) {
       case 'saveSession':
         responseData = handleSaveSession(payload);
         break;
+      case 'endSession':
+        responseData = handleEndSession(payload);
+        break;
       case 'deleteSession':
         responseData = handleDeleteSession(payload);
+        break;
+      case 'resetSystemData':
+        responseData = handleResetSystemData(payload);
         break;
       case 'saveQuestion':
         responseData = handleSaveQuestion(payload);
@@ -2221,14 +2227,17 @@ function handleGetLiveProctor(payload) {
 
   const activeSession = sessions.find(s => !sessionId || String(s.session_id) === String(sessionId)) || sessions[0];
   const targetSessionId = activeSession ? activeSession.session_id : (sessionId || 'SES-001');
+  const isSessionActive = !!(activeSession && String(activeSession.is_active).toUpperCase() === 'TRUE');
 
-  // Ambil cache live proctor
+  // Ambil cache live proctor (kosongkan jika sesi sedang nonaktif/mati)
   const cache = CacheService.getScriptCache();
   const cacheKey = 'proctor_' + targetSessionId;
   let proctorData = {};
-  const cachedStr = cache.get(cacheKey);
-  if (cachedStr) {
-    try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+  if (isSessionActive) {
+    const cachedStr = cache.get(cacheKey);
+    if (cachedStr) {
+      try { proctorData = JSON.parse(cachedStr); } catch (e) {}
+    }
   }
 
   // Hitung jumlah soal per paket dari Bank Soal
@@ -2239,29 +2248,32 @@ function handleGetLiveProctor(payload) {
   });
   const hasQuestionPakets = Object.keys(questionCountByPaket).length > 0;
 
-  // Filter peserta secara KETAT sesuai pemetaan Sesi & Bank Soal:
-  // Hanya tampilkan peserta yang memang diplot ke sesi & paket soal yang valid,
-  // atau sudah memiliki submission / heartbeat aktif di sesi ini.
-  const rawTargetParts = participants.filter(function(p) {
+  const isValidPaket = function(pkt) {
+    const clean = String(pkt || '').trim();
+    const lower = clean.toLowerCase();
+    if (!clean || clean === '-' || lower === 'null' || lower === 'undefined') return false;
+    return !hasQuestionPakets || (questionCountByPaket[lower] > 0);
+  };
+
+  // Filter peserta secara KETAT:
+  // Hanya tampilkan peserta yang SUDAH mendapatkan paket soal valid pada sesi ini.
+  // Jika peserta tidak mendapat paket, namanya TIDAK BOLEH muncul di Live Monitor.
+  const rawTargetParts = !isSessionActive ? [] : participants.filter(function(p) {
     const pId = String(p.participant_id || '').trim().toLowerCase();
     const pUser = String(p.username || '').trim().toLowerCase();
     const pSess = String(p.session_id || '').trim();
     const pPaket = String(p.paket || '').trim();
-    const pPaketLower = pPaket.toLowerCase();
 
+    if (!isValidPaket(pPaket)) return false;
+
+    const isMappedToSession = pSess === String(targetSessionId).trim();
     const hasLive = !!(proctorData[p.participant_id] || proctorData[pUser]);
     const hasSubInSession = submissions.some(function(s) {
       const sPid = String(s.participant_id || '').trim().toLowerCase();
       return String(s.session_id) === String(targetSessionId) && (sPid === pId || sPid === pUser);
     });
 
-    if (hasLive || hasSubInSession) return true;
-
-    const isMappedToSession = pSess === String(targetSessionId).trim();
-    const hasAssignedPaket = pPaket !== '' && pPaket !== '-';
-    const paketHasQuestions = !hasQuestionPakets || (questionCountByPaket[pPaketLower] > 0);
-
-    return isMappedToSession && hasAssignedPaket && paketHasQuestions;
+    return isMappedToSession || hasLive || hasSubInSession;
   });
 
   // Deduplikasi peserta unik berdasarkan username / identifier / ID agar total tetap sesuai jumlah asli (38)
@@ -2384,6 +2396,7 @@ function handleGetLiveProctor(payload) {
   return {
     status: 'success',
     sessionId: targetSessionId,
+    sessionActive: isSessionActive,
     session: activeSession,
     totalRegistered: targetParts.length,
     activeCount: liveList.filter(l => l.status === 'in_progress').length,
@@ -2424,5 +2437,208 @@ function handleProctorAction(payload) {
   return {
     status: 'success',
     message: `Aksi pengawas "${actionType}" berhasil dikirimkan ke peserta.`
+  };
+}
+
+/**
+ * Akhiri Sesi Ujian Secara Paksa & Menyeluruh:
+ * - Memfinalisasi / menyimpan seluruh jawaban peserta yang sedang mengerjakan ke sheet Submissions
+ * - Menutup sesi (is_active = FALSE)
+ * - Mengeluarkan peserta yang masih berada di ruang ujian secara otomatis
+ * - Mengembalikan plotting peserta menjadi bersih seperti sebelum ujian
+ */
+function handleEndSession(payload) {
+  const { secretKey, sessionId } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!sessionId) return { status: 'error', message: 'sessionId wajib diisi' };
+
+  const ss = getSpreadsheet();
+  const sessSheet = ss.getSheetByName(SHEETS.SESSIONS);
+  if (!sessSheet || sessSheet.getLastRow() <= 1) {
+    return { status: 'error', message: 'Sesi tidak ditemukan' };
+  }
+
+  const sessRows = sessSheet.getDataRange().getValues();
+  let sessRowIdx = -1;
+  let sessionTitle = '';
+  for (let i = 1; i < sessRows.length; i++) {
+    if (String(sessRows[i][0]) === String(sessionId)) {
+      sessRowIdx = i + 1;
+      sessionTitle = String(sessRows[i][1] || '');
+      break;
+    }
+  }
+  if (sessRowIdx === -1) return { status: 'error', message: 'Sesi tidak ditemukan' };
+
+  const participants = getSheetDataAsObjects(SHEETS.PARTICIPANTS, ss);
+  const existingSubs = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
+  const allQuestions = getSheetDataAsObjects(SHEETS.QUESTIONS, ss);
+
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'proctor_' + sessionId;
+  let proctorData = {};
+  try {
+    const cachedStr = cache.get(cacheKey);
+    if (cachedStr) proctorData = JSON.parse(cachedStr);
+  } catch (e) {}
+
+  let subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
+  if (!subSheet) {
+    subSheet = ss.insertSheet(SHEETS.SUBMISSIONS);
+    subSheet.appendRow(HEADERS.Submissions);
+    formatHeaderRow(subSheet, HEADERS.Submissions.length);
+  }
+
+  const nowIso = new Date().toISOString();
+  let finalizedCount = 0;
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+
+    // Kumpulkan semua peserta yang masih in_progress pada sesi ini
+    participants.forEach(function(p) {
+      const pId = String(p.participant_id || '').trim();
+      const pUser = String(p.username || '').trim().toLowerCase();
+      const pSess = String(p.session_id || '').trim();
+      const pStatus = String(p.status || '').trim().toLowerCase();
+      const liveEntry = proctorData[pId] || proctorData[pUser] || null;
+
+      const isWorkingInSession =
+        (pSess === String(sessionId) && pStatus === 'in_progress') ||
+        (liveEntry && String(liveEntry.sessionId) === String(sessionId) && String(liveEntry.status || '').toLowerCase() !== 'submitted');
+
+      if (!isWorkingInSession) return;
+
+      // Hindari duplikasi submission untuk sesi ini
+      const alreadySubmitted = existingSubs.some(function(s) {
+        const sPid = String(s.participant_id || '').trim().toLowerCase();
+        return String(s.session_id) === String(sessionId) && (sPid === pId.toLowerCase() || sPid === pUser);
+      });
+      if (alreadySubmitted) return;
+
+      const draftAnswers = (liveEntry && liveEntry.draftAnswers) ? liveEntry.draftAnswers : {};
+      let pgScore = 0;
+      Object.keys(draftAnswers).forEach(function(qId) {
+        const q = allQuestions.find(function(item) { return String(item.question_id) === String(qId); });
+        if (!q) return;
+        const w = Number(q.weight) || 1;
+        const uAns = draftAnswers[qId];
+        if (q.type === 'single_choice') {
+          if (uAns && String(uAns).trim().toUpperCase() === String(q.key_answer).trim().toUpperCase()) {
+            pgScore += w;
+          }
+        } else if (q.type === 'multiple_choice') {
+          const uArr = Array.isArray(uAns)
+            ? uAns.map(function(a) { return String(a).trim().toUpperCase(); }).sort().join(',')
+            : String(uAns || '').split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+          const kArr = String(q.key_answer).split(',').map(function(a) { return a.trim().toUpperCase(); }).sort().join(',');
+          if (uArr === kArr && uArr.length > 0) pgScore += w;
+        }
+      });
+
+      const violations = liveEntry ? (Number(liveEntry.violations) || 0) : 0;
+      const subId = 'SUB-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000);
+      subSheet.appendRow([
+        subId,
+        pId,
+        sessionId,
+        JSON.stringify(draftAnswers),
+        pgScore,
+        0,
+        pgScore,
+        violations,
+        nowIso
+      ]);
+      finalizedCount++;
+    });
+
+    // Tutup sesi (is_active = FALSE pada kolom ke-6)
+    sessSheet.getRange(sessRowIdx, 6).setValue(false);
+
+    // Kembalikan tabel peserta ke kondisi awal (tanpa plotting/token)
+    resetParticipantsPlottingForSession(ss, sessionId);
+  } finally {
+    lock.releaseLock();
+  }
+
+  try { cache.remove(cacheKey); } catch (e) {}
+  clearExamCache(sessionId);
+
+  return {
+    status: 'success',
+    finalizedCount: finalizedCount,
+    message: `Sesi "${sessionTitle || sessionId}" telah diakhiri secara menyeluruh. ${finalizedCount} ujian peserta yang sedang berlangsung otomatis dikumpulkan & dinilai, sesi ditutup, dan peserta dikeluarkan.`
+  };
+}
+
+/**
+ * Reset Data Sistem (Semua / Soal / Peserta / Sesi)
+ */
+function handleResetSystemData(payload) {
+  const { secretKey, resetType } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak: Secret Key salah' };
+
+  const mode = String(resetType || '').trim().toLowerCase();
+  const validModes = ['all', 'questions', 'participants', 'sessions'];
+  if (validModes.indexOf(mode) === -1) {
+    return { status: 'error', message: 'Tipe reset tidak valid' };
+  }
+
+  const ss = getSpreadsheet();
+  const clearSheetRows = function(sheetName) {
+    const sh = ss.getSheetByName(sheetName);
+    if (!sh) return 0;
+    const lastRow = sh.getLastRow();
+    if (lastRow <= 1) return 0;
+    const deleted = lastRow - 1;
+    sh.deleteRows(2, deleted);
+    return deleted;
+  };
+
+  // Bersihkan cache live proctor semua sesi sebelum sesi terhapus
+  try {
+    const cache = CacheService.getScriptCache();
+    const sessions = getSheetDataAsObjects(SHEETS.SESSIONS, ss);
+    sessions.forEach(function(s) {
+      if (s.session_id) {
+        try { cache.remove('proctor_' + s.session_id); } catch (e) {}
+        clearExamCache(s.session_id);
+      }
+    });
+  } catch (e) {}
+
+  const report = {};
+  if (mode === 'questions' || mode === 'all') {
+    report.questionsDeleted = clearSheetRows(SHEETS.QUESTIONS);
+  }
+  if (mode === 'participants' || mode === 'all') {
+    report.participantsDeleted = clearSheetRows(SHEETS.PARTICIPANTS);
+  }
+  if (mode === 'sessions' || mode === 'all') {
+    report.sessionsDeleted = clearSheetRows(SHEETS.SESSIONS);
+    if (mode === 'sessions') {
+      report.participantsUnplotted = resetParticipantsPlottingForSession(ss, null);
+    }
+  }
+  if (mode === 'all') {
+    report.submissionsDeleted = clearSheetRows(SHEETS.SUBMISSIONS);
+    report.archiveDeleted = clearSheetRows('Archive_Submissions');
+  }
+
+  clearExamCache();
+
+  const labelMap = {
+    all: 'Reset Semua Data (Soal, Peserta, Sesi, dan Rekap Nilai)',
+    questions: 'Reset Soal (Seluruh Bank Soal dihapus)',
+    participants: 'Reset Peserta (Seluruh Data Peserta dihapus)',
+    sessions: 'Reset Sesi (Seluruh Mata Ujian dihapus)'
+  };
+
+  return {
+    status: 'success',
+    resetType: mode,
+    report: report,
+    message: `${labelMap[mode]} berhasil dieksekusi.`
   };
 }

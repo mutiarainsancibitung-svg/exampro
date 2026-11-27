@@ -517,7 +517,8 @@ export const gasApi = {
       const db = getMockDb();
       const sess = db.sessions.find(s => !sessionId || s.session_id === sessionId) || db.sessions[0];
       const targetSessionId = sess ? sess.session_id : 'SES-001';
-      const proctorData = db.liveProctor || {};
+      const isSessionActive = Boolean(sess && sess.is_active);
+      const proctorData = isSessionActive ? (db.liveProctor || {}) : {};
       const nowEpoch = Date.now();
 
       const allQ = db.questions || [];
@@ -527,25 +528,28 @@ export const gasApi = {
         qCountByPaket[pkt] = (qCountByPaket[pkt] || 0) + 1;
       });
       const hasQPakets = Object.keys(qCountByPaket).length > 0;
+      const isValidPaket = (pkt) => {
+        const clean = String(pkt || '').trim();
+        const lower = clean.toLowerCase();
+        if (!clean || clean === '-' || lower === 'null' || lower === 'undefined') return false;
+        return !hasQPakets || (qCountByPaket[lower] > 0);
+      };
 
-      const rawParticipants = (db.participants || []).filter(p => {
+      const rawParticipants = !isSessionActive ? [] : (db.participants || []).filter(p => {
         const pId = String(p.participant_id || '').trim().toLowerCase();
         const pUser = String(p.username || '').trim().toLowerCase();
         const pSess = String(p.session_id || '').trim();
         const pPaket = String(p.paket || '').trim();
-        const pPaketLower = pPaket.toLowerCase();
 
+        if (!isValidPaket(pPaket)) return false;
+
+        const isMapped = pSess === String(targetSessionId).trim();
         const hasLive = Boolean(proctorData[p.participant_id] || proctorData[pUser]);
         const hasSub = (db.submissions || []).some(s => {
           const sPid = String(s.participant_id || '').trim().toLowerCase();
           return s.session_id === targetSessionId && (sPid === pId || sPid === pUser);
         });
-        if (hasLive || hasSub) return true;
-
-        const isMapped = pSess === String(targetSessionId).trim();
-        const hasPaket = pPaket !== '' && pPaket !== '-';
-        const paketValid = !hasQPakets || (qCountByPaket[pPaketLower] > 0);
-        return isMapped && hasPaket && paketValid;
+        return isMapped || hasLive || hasSub;
       });
 
       // Deduplikasi peserta unik di mock mode
@@ -877,6 +881,153 @@ export const gasApi = {
     });
     const data = await response.json();
     if (data.status !== 'success') throw new Error(data.message || 'Gagal menghapus sesi ujian');
+    this.clearDashboardCache();
+    return data;
+  },
+
+  /**
+   * Akhiri Sesi Ujian Secara Menyeluruh (Admin):
+   * Memfinalisasi seluruh ujian peserta yang sedang berlangsung, menutup sesi, dan membersihkan plotting.
+   */
+  async endSession(secretKey, sessionId) {
+    if (!sessionId) throw new Error('ID sesi wajib diisi');
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const sessIdx = (db.sessions || []).findIndex(s => s.session_id === sessionId);
+      if (sessIdx === -1) throw new Error('Sesi ujian tidak ditemukan');
+
+      const proctorData = db.liveProctor || {};
+      const allQ = db.questions || [];
+      let finalizedCount = 0;
+
+      (db.participants || []).forEach(p => {
+        const liveEntry = proctorData[p.participant_id] || proctorData[String(p.username || '').toLowerCase()];
+        const isWorking = (p.session_id === sessionId && p.status === 'in_progress') ||
+          (liveEntry && liveEntry.sessionId === sessionId && liveEntry.status !== 'submitted');
+        if (!isWorking) return;
+
+        const alreadySubmitted = (db.submissions || []).some(s =>
+          s.session_id === sessionId && (s.participant_id === p.participant_id || s.participant_id === p.username)
+        );
+        if (alreadySubmitted) return;
+
+        const draftAnswers = liveEntry?.draftAnswers || {};
+        let pgScore = 0;
+        Object.keys(draftAnswers).forEach(qId => {
+          const q = allQ.find(item => item.question_id === qId);
+          if (!q) return;
+          const w = Number(q.weight) || 1;
+          const uAns = draftAnswers[qId];
+          if (q.type === 'single_choice') {
+            if (uAns && String(uAns).trim().toUpperCase() === String(q.key_answer).trim().toUpperCase()) {
+              pgScore += w;
+            }
+          } else if (q.type === 'multiple_choice') {
+            const uArr = Array.isArray(uAns)
+              ? uAns.map(a => String(a).trim().toUpperCase()).sort().join(',')
+              : String(uAns || '').split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+            const kArr = String(q.key_answer).split(',').map(a => a.trim().toUpperCase()).sort().join(',');
+            if (uArr === kArr && uArr.length > 0) pgScore += w;
+          }
+        });
+
+        db.submissions = db.submissions || [];
+        db.submissions.push({
+          submission_id: 'SUB-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          participant_id: p.participant_id,
+          session_id: sessionId,
+          answers_json: JSON.stringify(draftAnswers),
+          pg_score: pgScore,
+          essay_score: 0,
+          total_score: pgScore,
+          tab_switch_count: Number(liveEntry?.violations) || 0,
+          submitted_at: new Date().toISOString()
+        });
+        finalizedCount++;
+      });
+
+      db.sessions[sessIdx].is_active = false;
+      db.participants = (db.participants || []).map(p => ({
+        ...p,
+        session_id: '',
+        paket: '-',
+        token_used: '',
+        start_time: '',
+        status: 'registered'
+      }));
+      db.liveProctor = {};
+      saveMockDb(db);
+      this.clearDashboardCache();
+
+      return {
+        status: 'success',
+        finalizedCount,
+        message: `Sesi "${db.sessions[sessIdx].title}" berhasil diakhiri. ${finalizedCount} ujian peserta aktif telah diselesaikan & disimpan (mode lokal).`
+      };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'endSession', secretKey, sessionId })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal mengakhiri sesi ujian');
+    this.clearDashboardCache();
+    return data;
+  },
+
+  /**
+   * Reset Data Sistem (all | questions | participants | sessions)
+   */
+  async resetSystemData(secretKey, resetType) {
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const report = {};
+      if (resetType === 'questions' || resetType === 'all') {
+        report.questionsDeleted = (db.questions || []).length;
+        db.questions = [];
+      }
+      if (resetType === 'participants' || resetType === 'all') {
+        report.participantsDeleted = (db.participants || []).length;
+        db.participants = [];
+      }
+      if (resetType === 'sessions' || resetType === 'all') {
+        report.sessionsDeleted = (db.sessions || []).length;
+        db.sessions = [];
+        if (resetType === 'sessions') {
+          db.participants = (db.participants || []).map(p => ({
+            ...p,
+            session_id: '',
+            paket: '-',
+            token_used: '',
+            start_time: '',
+            status: 'registered'
+          }));
+        }
+      }
+      if (resetType === 'all') {
+        report.submissionsDeleted = (db.submissions || []).length;
+        db.submissions = [];
+        db.archivedSubmissions = [];
+      }
+      db.liveProctor = {};
+      saveMockDb(db);
+      this.clearDashboardCache();
+      return {
+        status: 'success',
+        resetType,
+        report,
+        message: `Reset data (${resetType}) berhasil dieksekusi (mode lokal).`
+      };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'resetSystemData', secretKey, resetType })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal melakukan reset data');
     this.clearDashboardCache();
     return data;
   },

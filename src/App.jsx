@@ -18,6 +18,7 @@ import { ExamSetupPage } from './pages/admin/ExamSetupPage';
 import { SessionsPage } from './pages/admin/SessionsPage';
 import { BackupRestorePage } from './pages/admin/BackupRestorePage';
 import { LiveMonitorPage } from './pages/admin/LiveMonitorPage';
+import { ResetDataPage } from './pages/admin/ResetDataPage';
 
 export default function App() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/admin/results" element={<ResultsPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/admin/backup-restore" element={<BackupRestorePage />} />
+            <Route path="/admin/reset" element={<ResetDataPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

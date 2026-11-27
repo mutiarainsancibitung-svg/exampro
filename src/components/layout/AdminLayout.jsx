@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard,
@@ -13,12 +13,20 @@ import {
   Sliders,
   Database,
   Radio,
-  Calendar
+  Calendar,
+  RotateCcw,
+  Trash2,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 
 export const AdminLayout = ({ children, title }) => {
   const { logoutAdmin, adminUser, adminRole } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [resetMenuOpen, setResetMenuOpen] = useState(
+    location.pathname === '/admin/reset'
+  );
 
   const handleLogout = () => {
     logoutAdmin();
@@ -51,15 +59,15 @@ export const AdminLayout = ({ children, title }) => {
     { label: 'Dashboard & Sesi', path: '/admin/dashboard', icon: LayoutDashboard, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Live Monitor Ujian', path: '/admin/monitor', icon: Radio, roles: ['superadmin', 'instructor', 'proctor'] },
     
-    // Grup Sub-Menu Pengaturan Ujian & Soal (Sesuai Permintaan User)
+    // Grup Sub-Menu Pengaturan Ujian & Soal (Urutan: 1. Mata Ujian -> 2. Bank Soal -> 3. Atur Ujian & Pemetaan)
     {
       isGroupHeader: true,
       title: 'Pengaturan Ujian & Soal',
       roles: ['superadmin', 'instructor']
     },
-    { label: '1. Atur Ujian & Pemetaan', path: '/admin/exam-setup', icon: Sliders, roles: ['superadmin', 'instructor'], isSubMenu: true },
-    { label: '2. Data Mata Ujian / Kegiatan', path: '/admin/sessions', icon: Calendar, roles: ['superadmin', 'instructor'], isSubMenu: true },
-    { label: '3. Data Bank Soal & Paket', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'], isSubMenu: true },
+    { label: '1. Data Mata Ujian / Kegiatan', path: '/admin/sessions', icon: Calendar, roles: ['superadmin', 'instructor'], isSubMenu: true },
+    { label: '2. Data Bank Soal & Paket', path: '/admin/questions', icon: BookOpen, roles: ['superadmin', 'instructor'], isSubMenu: true },
+    { label: '3. Atur Ujian & Pemetaan', path: '/admin/exam-setup', icon: Sliders, roles: ['superadmin', 'instructor'], isSubMenu: true },
 
     // Grup Menu Peserta & Hasil
     {
@@ -70,10 +78,24 @@ export const AdminLayout = ({ children, title }) => {
     { label: 'Data Peserta & Excel', path: '/admin/participants', icon: Users, roles: ['superadmin', 'instructor', 'proctor'] },
     { label: 'Rekap Nilai & Essay', path: '/admin/results', icon: Award, roles: ['superadmin', 'instructor'] },
     { label: 'Cadangan & Pemulihan', path: '/admin/backup-restore', icon: Database, roles: ['superadmin'] },
+    {
+      isResetSubMenuGroup: true,
+      label: 'Reset Data',
+      icon: RotateCcw,
+      roles: ['superadmin'],
+      children: [
+        { label: 'Reset Semua', path: '/admin/reset?mode=all', mode: 'all' },
+        { label: 'Reset Soal (Hapus Soal Semua)', path: '/admin/reset?mode=questions', mode: 'questions' },
+        { label: 'Reset Peserta (Hapus Peserta Semua)', path: '/admin/reset?mode=participants', mode: 'participants' },
+        { label: 'Reset Sesi (Hapus Sesi Semua)', path: '/admin/reset?mode=sessions', mode: 'sessions' }
+      ]
+    },
     { label: 'Kelola Admin & Role', path: '/admin/users', icon: ShieldCheck, roles: ['superadmin'] }
   ];
 
   const navItems = allNavItems.filter((item) => item.roles.includes(currentRole));
+  const currentSearchParams = new URLSearchParams(location.search);
+  const activeResetMode = location.pathname === '/admin/reset' ? (currentSearchParams.get('mode') || 'all') : '';
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-mint-grid">
@@ -142,6 +164,55 @@ export const AdminLayout = ({ children, title }) => {
               );
             }
 
+            if (item.isResetSubMenuGroup) {
+              const isResetSectionActive = location.pathname === '/admin/reset';
+              return (
+                <div key={'reset-group-' + idx} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setResetMenuOpen(prev => !prev)}
+                    className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
+                      isResetSectionActive
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200 font-bold'
+                        : 'text-slate-600 hover:bg-rose-50/60 hover:text-rose-700'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <item.icon className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {resetMenuOpen ? (
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                  </button>
+
+                  {resetMenuOpen && (
+                    <div className="ml-3 pl-2.5 border-l-2 border-rose-100 space-y-1">
+                      {item.children.map((sub) => {
+                        const subActive = location.pathname === '/admin/reset' && activeResetMode === sub.mode;
+                        return (
+                          <NavLink
+                            key={sub.path}
+                            to={sub.path}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-semibold transition-all ${
+                              subActive
+                                ? 'bg-rose-600 text-white shadow-sm font-bold'
+                                : 'text-slate-600 hover:bg-rose-50 hover:text-rose-800'
+                            }`}
+                          >
+                            <Trash2 className={`w-3.5 h-3.5 shrink-0 ${subActive ? 'text-white' : 'text-rose-500'}`} />
+                            <span className="truncate">{sub.label}</span>
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <NavLink
                 key={item.path}
@@ -156,8 +227,12 @@ export const AdminLayout = ({ children, title }) => {
                   }`
                 }
               >
-                <item.icon className={`w-4 h-4 shrink-0 ${item.isSubMenu ? 'text-kemenag-600' : ''}`} />
-                <span className="truncate">{item.label}</span>
+                {({ isActive }) => (
+                  <>
+                    <item.icon className={`w-4 h-4 shrink-0 ${item.isSubMenu && !isActive ? 'text-kemenag-600' : ''}`} />
+                    <span className="truncate">{item.label}</span>
+                  </>
+                )}
               </NavLink>
             );
           })}

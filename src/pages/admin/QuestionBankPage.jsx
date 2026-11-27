@@ -363,10 +363,10 @@ export const QuestionBankPage = () => {
   }
 
   return (
-    <AdminLayout title="Data Bank Soal & Paket (Sub Menu 3)">
+    <AdminLayout title="Data Bank Soal & Paket (Langkah 2)">
       <div className="space-y-6">
         {/* Navigasi Sub Menu 3-Laman */}
-        <ExamSubNav active={3} />
+        <ExamSubNav active={2} />
 
         {/* Banner Status Koneksi Google Apps Script */}
         {!gasApi.isConfigured() ? (

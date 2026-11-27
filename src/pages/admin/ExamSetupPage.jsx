@@ -6,6 +6,7 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { ExamSubNav } from '../../components/layout/ExamSubNav';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import {
   Sliders,
@@ -18,12 +19,11 @@ import {
   CheckCheck,
   Search,
   ArrowRight,
-  GraduationCap,
-  Sparkles,
+  ArrowLeft,
   RotateCw,
-  ExternalLink,
+  AlertCircle,
   Layers,
-  AlertCircle
+  Trash2
 } from 'lucide-react';
 
 export const ExamSetupPage = () => {
@@ -37,21 +37,23 @@ export const ExamSetupPage = () => {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Workflow state
-  const [selectedSessionId, setSelectedSessionId] = useState('');
-  const [selectedPackage, setSelectedPackage] = useState('');
-  const [targetMode, setTargetMode] = useState('class'); // 'class' | 'individual'
-  const [selectedClass, setSelectedClass] = useState('');
-  const [individualSearch, setIndividualSearch] = useState('');
-  const [isApplyingClass, setIsApplyingClass] = useState(false);
+  // State Pop-up Wizard Pemetaan (Step 1 Paket -> Step 2 Peserta -> Step 3 Tetapkan Final)
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardSession, setWizardSession] = useState(null);
+  const [wizardStep, setWizardStep] = useState(1); // 1 | 2 | 3
+  const [wizardPackage, setWizardPackage] = useState('');
+  const [wizardTargetMode, setWizardTargetMode] = useState('class'); // 'class' | 'individual'
+  const [wizardSelectedClasses, setWizardSelectedClasses] = useState([]);
+  const [wizardSelectedIds, setWizardSelectedIds] = useState([]);
+  const [wizardSearch, setWizardSearch] = useState('');
+  const [savingMapping, setSavingMapping] = useState(false);
 
-  // Multi-select peserta
-  const [selectedParticipantIds, setSelectedParticipantIds] = useState([]);
+  // State Tabel Verifikasi Peserta Terpetakan di Bawah Rangkuman
+  const [selectedTableIds, setSelectedTableIds] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClassTable, setFilterClassTable] = useState('ALL');
   const [filterPackageTable, setFilterPackageTable] = useState('ALL');
-  const [customTargetPackage, setCustomTargetPackage] = useState('');
-  const [isUpdatingSelected, setIsUpdatingSelected] = useState(false);
+  const [isClearingPlotting, setIsClearingPlotting] = useState(false);
 
   useEffect(() => {
     if (!isAdminLoggedIn) {
@@ -66,37 +68,10 @@ export const ExamSetupPage = () => {
     try {
       const res = await gasApi.getAdminDashboard(adminSecretKey, forceRefresh);
       if (res.status === 'success') {
-        const sessList = res.sessions || [];
-        const qList = res.questions || [];
-        const parts = res.participants || [];
-        const subs = res.submissions || [];
-
-        setSessions(sessList);
-        setQuestions(qList);
-        setParticipants(parts);
-        setSubmissions(subs);
-
-        // Inisialisasi pilihan default jika belum dipilih
-        if (sessList.length > 0 && !selectedSessionId) {
-          setSelectedSessionId(sessList[0].session_id);
-        }
-
-        // Ambil paket yang tersedia
-        const pkgs = Array.from(new Set([
-          ...qList.map(q => q.paket?.trim()),
-          ...parts.map(p => p.paket?.trim())
-        ].filter(Boolean)));
-
-        if (pkgs.length > 0 && !selectedPackage) {
-          setSelectedPackage(pkgs[0]);
-          setCustomTargetPackage(pkgs[0]);
-        }
-
-        // Ambil kelas yang tersedia
-        const clsList = Array.from(new Set(parts.map(p => p.kelas?.trim()).filter(Boolean)));
-        if (clsList.length > 0 && !selectedClass) {
-          setSelectedClass(clsList[0]);
-        }
+        setSessions(res.sessions || []);
+        setQuestions(res.questions || []);
+        setParticipants(res.participants || []);
+        setSubmissions(res.submissions || []);
       }
     } catch (err) {
       console.error('Gagal memuat data atur ujian:', err);
@@ -105,109 +80,155 @@ export const ExamSetupPage = () => {
     }
   };
 
-  // Ekstrak data dinamis
-  const dynamicClasses = Array.from(new Set(participants.map(p => p.kelas?.trim()).filter(Boolean)));
-  const dynamicPackages = Array.from(new Set([
-    ...questions.map(q => q.paket?.trim()),
-    ...participants.map(p => p.paket?.trim())
-  ].filter(Boolean)));
+  // Ekstrak daftar paket murni dari Bank Soal + kelas dari Peserta
+  const dynamicPackages = Array.from(
+    new Set(questions.map(q => q.paket?.trim()).filter(Boolean))
+  );
+  const dynamicClasses = Array.from(
+    new Set(participants.map(p => p.kelas?.trim()).filter(Boolean))
+  );
 
-  const activeSession = sessions.find(s => s.session_id === selectedSessionId) || sessions[0];
-
-  // Aksi 1: Terapkan Pemetaan Paket Berdasarkan Kelas (Massal)
-  const handleApplyClassMapping = async () => {
-    if (!selectedClass.trim()) {
-      alert('Pilih kelas yang ingin dipetakan!');
-      return;
-    }
-    if (!selectedPackage.trim()) {
-      alert('Pilih paket soal yang akan digunakan!');
-      return;
-    }
-
-    const targetParticipants = participants.filter(
-      p => (p.kelas || '').trim().toLowerCase() === selectedClass.trim().toLowerCase()
+  // Rangkuman pemetaan per sesi
+  const getSessionSummary = (sess) => {
+    const mappedParticipants = participants.filter(
+      p => String(p.session_id || '').trim() === String(sess.session_id).trim() &&
+           String(p.paket || '').trim() !== '' &&
+           String(p.paket || '').trim() !== '-'
     );
+    const mappedPakets = Array.from(
+      new Set(mappedParticipants.map(p => String(p.paket).trim()))
+    );
+    const mappedClasses = Array.from(
+      new Set(mappedParticipants.map(p => String(p.kelas || '').trim()).filter(Boolean))
+    );
+    const subCount = submissions.filter(
+      s => String(s.session_id || '').trim() === String(sess.session_id).trim()
+    ).length;
 
-    if (targetParticipants.length === 0) {
-      alert(`Tidak ada peserta yang terdaftar pada kelas "${selectedClass}".`);
+    return { mappedParticipants, mappedPakets, mappedClasses, subCount };
+  };
+
+  // Buka Pop-up Wizard saat Rangkuman Data Mata Ujian diklik
+  const handleOpenMappingWizard = (sess) => {
+    const summary = getSessionSummary(sess);
+    setWizardSession(sess);
+    setWizardStep(1);
+    setWizardPackage(summary.mappedPakets[0] || dynamicPackages[0] || '');
+
+    if (summary.mappedClasses.length > 0 && summary.mappedParticipants.length > 0) {
+      setWizardTargetMode('class');
+      setWizardSelectedClasses(summary.mappedClasses);
+      setWizardSelectedIds(summary.mappedParticipants.map(p => p.participant_id));
+    } else {
+      setWizardTargetMode('class');
+      setWizardSelectedClasses(dynamicClasses.length > 0 ? [dynamicClasses[0]] : []);
+      setWizardSelectedIds([]);
+    }
+    setWizardSearch('');
+    setWizardOpen(true);
+  };
+
+  const toggleWizardClass = (cls) => {
+    setWizardSelectedClasses(prev =>
+      prev.includes(cls) ? prev.filter(c => c !== cls) : [...prev, cls]
+    );
+  };
+
+  const toggleWizardParticipant = (id) => {
+    setWizardSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  // Hitung peserta target pada Pop-up Wizard berdasarkan mode Pilihan Kelas vs Per Orang
+  const getWizardTargetParticipants = () => {
+    if (wizardTargetMode === 'class') {
+      const lowerSet = new Set(wizardSelectedClasses.map(c => c.toLowerCase()));
+      return participants.filter(p => lowerSet.has(String(p.kelas || '').trim().toLowerCase()));
+    }
+    const idSet = new Set(wizardSelectedIds);
+    return participants.filter(p => idSet.has(p.participant_id));
+  };
+
+  // Finalisasi & Simpan Pemetaan
+  const handleFinalizeMapping = async () => {
+    if (!wizardSession) return;
+    if (!wizardPackage.trim()) {
+      alert('Pilih paket soal terlebih dahulu pada Langkah 1.');
+      setWizardStep(1);
+      return;
+    }
+    const targetList = getWizardTargetParticipants();
+    if (targetList.length === 0) {
+      alert('Pilih minimal 1 kelas atau 1 peserta pada Langkah 2.');
+      setWizardStep(2);
       return;
     }
 
-    const confirmMsg = `Konfirmasi Pemetaan:\n` +
-      `- Mata Ujian/Kegiatan: ${activeSession?.title || 'Sesi Aktif'}\n` +
-      `- Kelas Sasaran: ${selectedClass} (${targetParticipants.length} Peserta)\n` +
-      `- Paket Soal yang Ditetapkan: ${selectedPackage}\n\n` +
-      `Apakah Anda yakin ingin memetakan paket "${selectedPackage}" ke seluruh peserta kelas "${selectedClass}"?`;
-
-    if (!window.confirm(confirmMsg)) return;
-
-    setIsApplyingClass(true);
+    setSavingMapping(true);
     try {
-      const updatedList = targetParticipants.map(p => ({
+      const updatedList = targetList.map(p => ({
         ...p,
-        paket: selectedPackage,
-        session_id: activeSession ? activeSession.session_id : p.session_id
+        paket: wizardPackage,
+        session_id: wizardSession.session_id
       }));
 
       await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
-      alert(`Sukses! Sebanyak ${updatedList.length} peserta kelas "${selectedClass}" berhasil dipetakan ke paket "${selectedPackage}".`);
-      loadData();
+      alert(
+        `Pemetaan Final Berhasil Disimpan!\n` +
+        `- Mata Ujian: ${wizardSession.title}\n` +
+        `- Paket Soal: ${wizardPackage}\n` +
+        `- Total Peserta Terpetakan: ${updatedList.length} orang`
+      );
+      setWizardOpen(false);
+      await loadData(true);
     } catch (err) {
-      alert('Gagal menerapkan pemetaan kelas: ' + err.message);
+      alert('Gagal menyimpan pemetaan ujian: ' + err.message);
     } finally {
-      setIsApplyingClass(false);
+      setSavingMapping(false);
     }
   };
 
-  // Aksi 2: Terapkan Paket ke Peserta yang Dicentang (Pilih Per Orang / Selektif)
-  const handleApplyCustomPackageToSelected = async (pkgOverride = null) => {
-    const targetPkg = (typeof pkgOverride === 'string' && pkgOverride) ? pkgOverride : customTargetPackage;
-    if (selectedParticipantIds.length === 0) {
-      alert('Pilih minimal satu peserta (centang nama peserta) yang ingin dipetakan.');
+  // Reset Plotting untuk sesi tertentu dari kartu Rangkuman
+  const handleResetSessionPlotting = async (e, sess) => {
+    e.stopPropagation();
+    const { mappedParticipants } = getSessionSummary(sess);
+    if (mappedParticipants.length === 0) {
+      alert(`Belum ada peserta yang terpetakan pada mata ujian "${sess.title}".`);
       return;
     }
-    if (!targetPkg.trim()) {
-      alert('Pilih paket soal tujuan pada Langkah 2!');
+    if (!window.confirm(`Hapus plotting ${mappedParticipants.length} peserta dari mata ujian "${sess.title}"?`)) {
       return;
     }
-
-    const confirmMsg = `Terapkan paket soal "${targetPkg}" (Sesi: ${activeSession?.title || 'Aktif'}) hanya untuk ${selectedParticipantIds.length} peserta terpilih?`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setIsUpdatingSelected(true);
+    setIsClearingPlotting(true);
     try {
-      const selectedParts = participants.filter(p => selectedParticipantIds.includes(p.participant_id));
-      const updatedList = selectedParts.map(p => ({
+      const updatedList = mappedParticipants.map(p => ({
         ...p,
-        paket: targetPkg,
-        session_id: activeSession ? activeSession.session_id : p.session_id
+        paket: '-',
+        session_id: '',
+        token_used: '',
+        start_time: '',
+        status: 'registered'
       }));
-
       await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
-      alert(`Berhasil memetakan paket "${targetPkg}" untuk ${updatedList.length} peserta terpilih.`);
-      setSelectedParticipantIds([]);
-      loadData(true);
+      alert(`Plotting untuk ${updatedList.length} peserta berhasil dibersihkan.`);
+      await loadData(true);
     } catch (err) {
-      alert('Gagal memperbarui paket peserta: ' + err.message);
+      alert('Gagal membersihkan plotting: ' + err.message);
     } finally {
-      setIsUpdatingSelected(false);
+      setIsClearingPlotting(false);
     }
   };
 
-  // Aksi 3: Reset Plotting (Hapus Pemetaan Sesi & Paket) untuk Peserta Terpilih
+  // Hapus Plotting peserta terpilih di tabel verifikasi
   const handleClearPlottingSelected = async () => {
-    if (selectedParticipantIds.length === 0) {
-      alert('Pilih minimal satu peserta yang ingin dibersihkan plotting-nya.');
+    if (selectedTableIds.length === 0) return;
+    if (!window.confirm(`Hapus plotting mata ujian & paket soal untuk ${selectedTableIds.length} peserta terpilih?`)) {
       return;
     }
-    if (!window.confirm(`Hapus plotting mata ujian & paket soal untuk ${selectedParticipantIds.length} peserta terpilih agar kembali menjadi "Belum Diplot"?`)) {
-      return;
-    }
-
-    setIsUpdatingSelected(true);
+    setIsClearingPlotting(true);
     try {
-      const selectedParts = participants.filter(p => selectedParticipantIds.includes(p.participant_id));
+      const selectedParts = participants.filter(p => selectedTableIds.includes(p.participant_id));
       const updatedList = selectedParts.map(p => ({
         ...p,
         paket: '-',
@@ -216,73 +237,80 @@ export const ExamSetupPage = () => {
         start_time: '',
         status: 'registered'
       }));
-
       await gasApi.batchSaveParticipants(adminSecretKey, updatedList);
       alert(`Plotting untuk ${updatedList.length} peserta berhasil dibersihkan.`);
-      setSelectedParticipantIds([]);
-      loadData(true);
+      setSelectedTableIds([]);
+      await loadData(true);
     } catch (err) {
       alert('Gagal membersihkan plotting peserta: ' + err.message);
     } finally {
-      setIsUpdatingSelected(false);
+      setIsClearingPlotting(false);
     }
   };
 
-  // Filter Tabel Peserta
+  // Filter Tabel Verifikasi Peserta
   const filteredParticipants = participants.filter(p => {
-    const matchSearch = (p.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (p.username || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (p.identifier || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchSearch =
+      (p.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.username || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.identifier || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchClass = filterClassTable === 'ALL' || (p.kelas || '').toLowerCase() === filterClassTable.toLowerCase();
     const matchPkg = filterPackageTable === 'ALL' || (p.paket || '').toLowerCase() === filterPackageTable.toLowerCase();
     return matchSearch && matchClass && matchPkg;
   });
 
-  // Toggle checklist peserta
-  const toggleSelectAll = () => {
-    if (selectedParticipantIds.length === filteredParticipants.length) {
-      setSelectedParticipantIds([]);
+  const toggleSelectAllTable = () => {
+    if (selectedTableIds.length === filteredParticipants.length) {
+      setSelectedTableIds([]);
     } else {
-      setSelectedParticipantIds(filteredParticipants.map(p => p.participant_id));
+      setSelectedTableIds(filteredParticipants.map(p => p.participant_id));
     }
   };
 
-  const toggleSelectOne = (id) => {
-    setSelectedParticipantIds(prev =>
+  const toggleSelectOneTable = (id) => {
+    setSelectedTableIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
 
+  const wizardFilteredIndividuals = participants.filter(p =>
+    (p.full_name || '').toLowerCase().includes(wizardSearch.toLowerCase()) ||
+    (p.username || '').toLowerCase().includes(wizardSearch.toLowerCase()) ||
+    (p.kelas || '').toLowerCase().includes(wizardSearch.toLowerCase())
+  );
+
+  const wizardTargetParticipants = getWizardTargetParticipants();
+
   if (loading) {
     return (
-      <AdminLayout title="Atur Ujian & Pemetaan Kelas (Sub Menu 1)">
+      <AdminLayout title="Atur Ujian & Pemetaan (Langkah 3)">
         <LoadingScreen
-          message="Menyiapkan Atur Ujian & Pemetaan..."
-          submessage="Sedang mengambil data mata ujian, paket bank soal, dan daftar kelas peserta..."
+          message="Menyiapkan Rangkuman & Pemetaan Ujian..."
+          submessage="Mengambil rangkuman mata ujian, paket bank soal, dan daftar peserta..."
         />
       </AdminLayout>
     );
   }
 
   return (
-    <AdminLayout title="Atur Ujian & Pemetaan Kelas (Sub Menu 1)">
+    <AdminLayout title="Atur Ujian & Pemetaan (Langkah 3)">
       <div className="space-y-6">
-        {/* Navigasi Sub Menu 3-Laman */}
-        <ExamSubNav active={1} />
+        {/* Navigasi Sub Menu 3-Laman (Langkah 3 aktif) */}
+        <ExamSubNav active={3} />
 
-        {/* Header Bar Sub Menu 1 */}
+        {/* Header Langkah 3 */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-kemenag-100 shadow-sm">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-kemenag-700 bg-kemenag-50 px-2.5 py-1 rounded-xl border border-kemenag-200">
-                Sub Menu 1
+                Langkah 3
               </span>
               <h3 className="font-extrabold text-slate-800 text-base">
-                Atur Ujian & Pemetaan Paket ke Kelas Sasaran
+                Rangkuman Mata Ujian & Pop-Up Pemetaan Paket ke Peserta
               </h3>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Hubungkan mata ujian aktif dengan paket soal tertentu, lalu petakan secara massal ke kelas atau peserta tertentu.
+              Klik salah satu rangkuman mata ujian atau tekan tombol <strong>"Petakan Ujian Ini"</strong> untuk mengatur paket soal, memilih peserta, lalu menetapkan finalisasi pemetaan.
             </p>
           </div>
 
@@ -292,12 +320,10 @@ export const ExamSetupPage = () => {
               size="sm"
               icon={RotateCw}
               onClick={() => loadData(true)}
-              title="Segarkan data dari Google Sheets"
               className="border-slate-200 text-slate-700 hover:bg-slate-50"
             >
               Segarkan
             </Button>
-
             <Button
               variant="outline"
               size="sm"
@@ -305,274 +331,171 @@ export const ExamSetupPage = () => {
               onClick={() => navigate('/admin/sessions')}
               className="border-kemenag-300 text-kemenag-800 hover:bg-kemenag-50"
             >
-              Kelola Mata Ujian (Sub Menu 2) &rarr;
+              Kelola Data Mata Ujian
             </Button>
           </div>
         </div>
 
-        {/* Workflow 3 Langkah Pemetaan */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Langkah 1: Pilih Mata Ujian */}
-          <div className="bg-white p-5 rounded-3xl border border-kemenag-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        {/* RANGKUMAN DATA MATA UJIAN (Klik Rangkuman -> Langsung Pop-up Wizard) */}
+        <Card className="overflow-hidden bg-white rounded-3xl border border-kemenag-200/80 shadow-sm">
+          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gradient-to-r from-kemenag-50/70 to-white">
             <div>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <span className="text-[10px] font-black uppercase tracking-wider text-kemenag-700 bg-kemenag-50 px-2.5 py-1 rounded-xl">
-                  Langkah 1
-                </span>
-                <Calendar className="w-4 h-4 text-kemenag-600" />
-              </div>
-              <div className="mt-3">
-                <h4 className="text-xs font-bold text-slate-700 mb-1.5">Pilih Mata Ujian / Kegiatan:</h4>
-                <select
-                  value={selectedSessionId}
-                  onChange={(e) => setSelectedSessionId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-2xl border border-kemenag-300 text-xs font-extrabold text-kemenag-900 bg-kemenag-50/50 focus:outline-none"
-                >
-                  {sessions.map(s => (
-                    <option key={s.session_id} value={s.session_id}>
-                      {s.title} ({s.type?.toUpperCase()} - Token: {s.token})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-500 mt-2 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" /> Durasi: <strong className="text-slate-700">{activeSession?.duration_minutes || 60} menit</strong>
-                  <span className="mx-1">•</span>
-                  <Key className="w-3.5 h-3.5 text-slate-400" /> Token: <strong className="font-mono text-kemenag-800">{activeSession?.token || '-'}</strong>
-                </p>
-              </div>
+              <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                <Layers className="w-4 h-4 text-kemenag-600" />
+                Rangkuman Data Mata Ujian
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Ringkasan status pemetaan setiap kegiatan evaluasi. Klik baris rangkuman untuk membuka pop-up pengaturan pemetaan.
+              </p>
             </div>
-
-            <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-              <span className="text-slate-400">Status: <strong className={activeSession?.is_active ? 'text-emerald-700' : 'text-slate-500'}>{activeSession?.is_active ? 'Aktif' : 'Ditutup'}</strong></span>
-              <button
-                onClick={() => navigate('/admin/sessions')}
-                className="text-kemenag-700 font-bold hover:underline"
-              >
-                Atur Sesi di Sub Menu 2 &rarr;
-              </button>
-            </div>
+            <span className="text-xs font-bold text-kemenag-800 bg-white border border-kemenag-200 px-3 py-1 rounded-xl shrink-0">
+              {sessions.length} Mata Ujian Terdata
+            </span>
           </div>
 
-          {/* Langkah 2: Pilih Paket Soal */}
-          <div className="bg-white p-5 rounded-3xl border border-emerald-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl">
-                  Langkah 2
-                </span>
-                <BookOpen className="w-4 h-4 text-emerald-600" />
-              </div>
-              <div className="mt-3">
-                <h4 className="text-xs font-bold text-slate-700 mb-1.5">Pilih Bank Soal / Paket:</h4>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedPackage}
-                    onChange={(e) => setSelectedPackage(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-2xl border border-emerald-300 text-xs font-extrabold text-emerald-900 bg-emerald-50/50 focus:outline-none"
-                  >
-                    {dynamicPackages.map(pkg => {
-                      const count = questions.filter(q => (q.paket || '').trim().toLowerCase() === pkg.toLowerCase()).length;
-                      return (
-                        <option key={pkg} value={pkg}>
-                          {pkg} {count > 0 ? `(${count} Soal)` : '(Paket Baru)'}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-2 flex items-center justify-between">
-                  <span>Total Soal Bank: <strong className="text-emerald-700">{questions.length} butir</strong></span>
-                  <button
-                    onClick={() => navigate('/admin/questions')}
-                    className="text-emerald-700 hover:underline font-bold text-[10px]"
-                  >
-                    Kelola di Sub Menu 3 &rarr;
-                  </button>
-                </p>
-              </div>
+          {sessions.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 text-xs space-y-3">
+              <Calendar className="w-8 h-8 text-slate-300 mx-auto" />
+              <p>Belum ada data mata ujian. Buat mata ujian terlebih dahulu di Langkah 1.</p>
+              <Button variant="primary" size="sm" onClick={() => navigate('/admin/sessions')}>
+                Ke Data Mata Ujian (Langkah 1)
+              </Button>
             </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {sessions.map((sess) => {
+                const { mappedParticipants, mappedPakets, mappedClasses, subCount } = getSessionSummary(sess);
+                const isMapped = mappedParticipants.length > 0 && mappedPakets.length > 0;
 
-            <div className="pt-3 mt-3 border-t border-slate-100 text-[11px] text-slate-400">
-              Paket aktif terpilih: <strong className="text-emerald-800">{selectedPackage || '-'}</strong>
-            </div>
-          </div>
+                return (
+                  <div
+                    key={sess.session_id}
+                    onClick={() => handleOpenMappingWizard(sess)}
+                    className="p-5 hover:bg-kemenag-50/40 transition cursor-pointer flex flex-col lg:flex-row lg:items-center justify-between gap-4 group"
+                  >
+                    {/* Kolom Rangkuman 1: Info Ringkas Mata Ujian */}
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-lg uppercase tracking-wider ${
+                          (sess.type || '').toLowerCase() === 'pretest'
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-kemenag-100 text-kemenag-900 border border-kemenag-300'
+                        }`}>
+                          {sess.type || 'Pretest'}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
+                          sess.is_active
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-slate-100 text-slate-500 border-slate-200'
+                        }`}>
+                          {sess.is_active ? 'Dibuka' : 'Ditutup'}
+                        </span>
+                        <span className="text-[11px] font-mono font-bold text-kemenag-800 bg-kemenag-50 px-2 py-0.5 rounded-lg border border-kemenag-200 flex items-center gap-1">
+                          <Key className="w-3 h-3" /> {sess.token}
+                        </span>
+                        <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-400" /> {sess.duration_minutes || 60} mnt
+                        </span>
+                      </div>
 
-          {/* Langkah 3: Terapkan ke Kelas atau Per Orang */}
-          <div className="bg-white p-5 rounded-3xl border border-blue-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-1 rounded-xl">
-                  Langkah 3
-                </span>
-                {/* Toggle Button Pilih Kelas vs Pilih Per Orang */}
-                <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setTargetMode('class')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${
-                      targetMode === 'class'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Pilih Kelas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTargetMode('individual')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${
-                      targetMode === 'individual'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Pilih Per Orang
-                  </button>
-                </div>
-              </div>
+                      <h5 className="font-extrabold text-slate-900 text-sm group-hover:text-kemenag-700 transition">
+                        {sess.title}
+                      </h5>
+                    </div>
 
-              {targetMode === 'class' ? (
-                <div className="mt-3">
-                  <h4 className="text-xs font-bold text-slate-700 mb-1.5">Pemetaan Kelas Sasaran:</h4>
-                  <select
-                    value={selectedClass}
-                    onChange={(e) => setSelectedClass(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-2xl border border-blue-300 text-xs font-extrabold text-blue-900 bg-blue-50/50 focus:outline-none"
-                  >
-                    {dynamicClasses.map(cls => {
-                      const count = participants.filter(p => (p.kelas || '').trim().toLowerCase() === cls.toLowerCase()).length;
-                      return (
-                        <option key={cls} value={cls}>
-                          {cls} ({count} Peserta)
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-700">Pilih Peserta Per Orang:</h4>
-                    <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg">
-                      {selectedParticipantIds.length} dipilih
-                    </span>
+                    {/* Kolom Rangkuman 2: Status Pemetaan Paket & Peserta */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 lg:w-[440px] shrink-0">
+                      <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">Paket Soal</span>
+                        {mappedPakets.length > 0 ? (
+                          <span className="text-xs font-extrabold text-emerald-800 line-clamp-1">
+                            {mappedPakets.join(', ')}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold text-amber-600">Belum dipilih</span>
+                        )}
+                      </div>
+
+                      <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">Peserta Terplot</span>
+                        <span className="text-xs font-extrabold text-slate-800 block">
+                          {mappedParticipants.length} Orang
+                        </span>
+                        {mappedClasses.length > 0 && (
+                          <span className="text-[10px] text-slate-500 line-clamp-1">
+                            {mappedClasses.join(', ')}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 col-span-2 sm:col-span-1">
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">Submisi</span>
+                        <span className="text-xs font-extrabold text-sky-800 block">
+                          {subCount} Terkumpul
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Kolom Rangkuman 3: Tombol Petakan Ujian Ini */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isMapped && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleResetSessionPlotting(e, sess)}
+                          disabled={isClearingPlotting}
+                          className="p-2 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 transition"
+                          title="Hapus semua plotting pada mata ujian ini"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={Sliders}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenMappingWizard(sess);
+                        }}
+                      >
+                        {isMapped ? 'Ubah Pemetaan' : 'Petakan Ujian Ini'}
+                      </Button>
+                    </div>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Cari nama/username peserta..."
-                    value={individualSearch}
-                    onChange={(e) => setIndividualSearch(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-blue-200 text-xs bg-slate-50 focus:bg-white focus:outline-none"
-                  />
-                  <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50/50">
-                    {participants
-                      .filter(p =>
-                        (p.full_name || '').toLowerCase().includes(individualSearch.toLowerCase()) ||
-                        (p.username || '').toLowerCase().includes(individualSearch.toLowerCase())
-                      )
-                      .map((p) => {
-                        const checked = selectedParticipantIds.includes(p.participant_id);
-                        return (
-                          <label
-                            key={p.participant_id}
-                            className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[11px] hover:bg-blue-50/60 ${
-                              checked ? 'bg-blue-50 font-bold text-blue-900' : 'text-slate-700'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleSelectOne(p.participant_id)}
-                              className="rounded text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="truncate flex-1">{p.full_name || p.username}</span>
-                            <span className="text-[10px] text-slate-400 shrink-0">{p.kelas}</span>
-                          </label>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
+          )}
+        </Card>
 
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              {targetMode === 'class' ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold"
-                  onClick={handleApplyClassMapping}
-                  loading={isApplyingClass}
-                >
-                  Terapkan Paket ke Kelas "{selectedClass}"
-                </Button>
-              ) : (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold"
-                  onClick={() => handleApplyCustomPackageToSelected(selectedPackage)}
-                  loading={isUpdatingSelected}
-                  disabled={selectedParticipantIds.length === 0}
-                >
-                  Terapkan Paket ke {selectedParticipantIds.length} Orang Terpilih
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tabel Verifikasi Peserta Terpetakan */}
+        {/* Tabel Verifikasi Daftar Peserta & Paket Soal Aktif */}
         <Card className="overflow-hidden bg-white rounded-3xl border border-kemenag-100 shadow-sm">
-          {/* Header & Filter Tabel */}
           <div className="p-5 border-b border-kemenag-100 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
                 <h4 className="font-extrabold text-slate-800 text-sm">
-                  Daftar Peserta & Paket Soal yang Ditetapkan
+                  Hasil Pemetaan Peserta & Paket Soal Aktif
                 </h4>
                 <p className="text-xs text-slate-500">
-                  Periksa paket soal yang akan diterima masing-masing peserta saat mereka masuk ke ruang ujian.
+                  Verifikasi akhir peserta yang sudah dipetakan paket soalnya pada masing-masing mata ujian.
                 </p>
               </div>
 
-              {/* Batch Action Peserta Terpilih */}
-              {selectedParticipantIds.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 p-2 bg-kemenag-50 border border-kemenag-200 rounded-2xl animate-fade-in">
-                  <span className="text-xs font-bold text-kemenag-800 px-2">
-                    {selectedParticipantIds.length} dipilih
-                  </span>
-                  <select
-                    value={customTargetPackage}
-                    onChange={(e) => setCustomTargetPackage(e.target.value)}
-                    className="px-2.5 py-1.5 rounded-xl border border-kemenag-300 text-xs font-bold text-kemenag-900 bg-white"
-                  >
-                    {dynamicPackages.map(pkg => (
-                      <option key={pkg} value={pkg}>{pkg}</option>
-                    ))}
-                  </select>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleApplyCustomPackageToSelected()}
-                    loading={isUpdatingSelected}
-                  >
-                    Ganti Paket
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleClearPlottingSelected}
-                    loading={isUpdatingSelected}
-                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
-                  >
-                    Hapus Plotting
-                  </Button>
-                </div>
+              {selectedTableIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Trash2}
+                  onClick={handleClearPlottingSelected}
+                  loading={isClearingPlotting}
+                  className="border-rose-300 text-rose-700 hover:bg-rose-50 shrink-0"
+                >
+                  Hapus Plotting ({selectedTableIds.length} Peserta)
+                </Button>
               )}
             </div>
 
-            {/* Filter Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
               <div className="flex flex-wrap items-center gap-2.5">
                 <div className="relative">
@@ -615,7 +538,6 @@ export const ExamSetupPage = () => {
             </div>
           </div>
 
-          {/* Isi Tabel Peserta */}
           <div className="overflow-x-auto">
             {filteredParticipants.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs">
@@ -628,23 +550,22 @@ export const ExamSetupPage = () => {
                     <th className="py-3 px-4 w-10 text-center">
                       <input
                         type="checkbox"
-                        checked={selectedParticipantIds.length > 0 && selectedParticipantIds.length === filteredParticipants.length}
-                        onChange={toggleSelectAll}
+                        checked={selectedTableIds.length > 0 && selectedTableIds.length === filteredParticipants.length}
+                        onChange={toggleSelectAllTable}
                         className="rounded text-kemenag-600 focus:ring-kemenag-500"
                       />
                     </th>
                     <th className="py-3 px-4 w-12 text-center">No</th>
                     <th className="py-3 px-4">Nama Lengkap & NIP</th>
                     <th className="py-3 px-4">Kelas</th>
+                    <th className="py-3 px-4">Mata Ujian Terhubung</th>
                     <th className="py-3 px-4">Paket Soal Aktif</th>
-                    <th className="py-3 px-4">Status Ujian</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredParticipants.map((p, idx) => {
-                    const isChecked = selectedParticipantIds.includes(p.participant_id);
-                    const sub = submissions.find(s => s.participant_id === p.participant_id);
-                    const isSubmitted = !!sub || String(p.status).toLowerCase() === 'submitted';
+                    const isChecked = selectedTableIds.includes(p.participant_id);
+                    const mappedSess = sessions.find(s => String(s.session_id) === String(p.session_id));
 
                     return (
                       <tr
@@ -655,7 +576,7 @@ export const ExamSetupPage = () => {
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            onChange={() => toggleSelectOne(p.participant_id)}
+                            onChange={() => toggleSelectOneTable(p.participant_id)}
                             className="rounded text-kemenag-600 focus:ring-kemenag-500"
                           />
                         </td>
@@ -668,8 +589,15 @@ export const ExamSetupPage = () => {
                         </td>
                         <td className="py-3 px-4">
                           <span className="font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
-                            {p.kelas || 'Belum Ada Kelas'}
+                            {p.kelas || '-'}
                           </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {mappedSess ? (
+                            <span className="text-slate-800 font-semibold line-clamp-1">{mappedSess.title}</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Belum terhubung</span>
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           {p.paket && p.paket !== '-' ? (
@@ -683,17 +611,6 @@ export const ExamSetupPage = () => {
                             </span>
                           )}
                         </td>
-                        <td className="py-3 px-4">
-                          {isSubmitted ? (
-                            <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-xl text-[11px]">
-                              Terkumpul (Skor: {sub?.total_score || sub?.pg_score || 0})
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded-xl text-[11px]">
-                              Belum Mengirim
-                            </span>
-                          )}
-                        </td>
                       </tr>
                     );
                   })}
@@ -703,6 +620,386 @@ export const ExamSetupPage = () => {
           </div>
         </Card>
       </div>
+
+      {/* POP-UP WIZARD PEMETAAN UJIAN (1. Paket Soal -> 2. Peserta -> 3. Tetapkan Final) */}
+      <Modal
+        isOpen={wizardOpen && Boolean(wizardSession)}
+        onClose={() => !savingMapping && setWizardOpen(false)}
+        title={`Petakan Ujian: ${wizardSession?.title || ''}`}
+        maxWidth="max-w-3xl"
+      >
+        {wizardSession && (
+          <div className="space-y-5 text-xs">
+            {/* Indikator 3 Langkah dalam Pop-up */}
+            <div className="grid grid-cols-3 gap-2 p-2 bg-slate-50 border border-slate-200 rounded-2xl">
+              {[
+                { step: 1, label: '1. Paket Soal' },
+                { step: 2, label: '2. Pilih Peserta' },
+                { step: 3, label: '3. Tetapkan Final' }
+              ].map((item) => {
+                const isCurrent = wizardStep === item.step;
+                const isDone = wizardStep > item.step;
+                return (
+                  <button
+                    key={item.step}
+                    type="button"
+                    onClick={() => {
+                      if (item.step === 1 || (item.step === 2 && wizardPackage) || (item.step === 3 && wizardPackage && wizardTargetParticipants.length > 0)) {
+                        setWizardStep(item.step);
+                      }
+                    }}
+                    className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 transition ${
+                      isCurrent
+                        ? 'bg-kemenag-600 text-white shadow-sm'
+                        : isDone
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'text-slate-500 bg-white/70'
+                    }`}
+                  >
+                    {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* LANGKAH 1 POP-UP: PENENTUAN PAKET SOAL */}
+            {wizardStep === 1 && (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-kemenag-50/70 border border-kemenag-200 rounded-2xl flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-kemenag-700">Mata Ujian Terpilih</span>
+                    <h5 className="font-extrabold text-slate-900 text-sm">{wizardSession.title}</h5>
+                  </div>
+                  <span className="font-mono font-bold text-kemenag-800 bg-white px-2.5 py-1 rounded-xl border border-kemenag-200">
+                    Token: {wizardSession.token}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-800 mb-2">
+                    Pilih Paket Bank Soal yang Akan Dikerjakan:
+                  </label>
+
+                  {dynamicPackages.length === 0 ? (
+                    <div className="p-6 text-center bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+                      <AlertCircle className="w-7 h-7 text-amber-600 mx-auto" />
+                      <p className="font-bold text-amber-900">Belum ada paket soal di Bank Soal!</p>
+                      <p className="text-amber-800 text-[11px]">
+                        Silakan buat atau impor soal pada menu "2. Data Bank Soal & Paket" terlebih dahulu.
+                      </p>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => {
+                          setWizardOpen(false);
+                          navigate('/admin/questions');
+                        }}
+                      >
+                        Buka Bank Soal (Langkah 2)
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+                      {dynamicPackages.map((pkg) => {
+                        const pkgQuestions = questions.filter(
+                          q => (q.paket || '').trim().toLowerCase() === pkg.toLowerCase()
+                        );
+                        const totalWeight = pkgQuestions.reduce((acc, q) => acc + (Number(q.weight) || 1), 0);
+                        const selected = wizardPackage === pkg;
+
+                        return (
+                          <button
+                            key={pkg}
+                            type="button"
+                            onClick={() => setWizardPackage(pkg)}
+                            className={`p-4 rounded-2xl border text-left transition flex items-start justify-between gap-3 ${
+                              selected
+                                ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-200 shadow-sm'
+                                : 'bg-white border-slate-200 hover:border-emerald-300'
+                            }`}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <BookOpen className={`w-4 h-4 ${selected ? 'text-emerald-700' : 'text-slate-400'}`} />
+                                <span className="font-extrabold text-sm text-slate-900">{pkg}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500">
+                                {pkgQuestions.length} butir soal • Bobot total: {totalWeight} poin
+                              </p>
+                            </div>
+                            <span className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
+                              selected ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 bg-white'
+                            }`}>
+                              {selected && <CheckCircle2 className="w-3.5 h-3.5" />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <Button variant="secondary" onClick={() => setWizardOpen(false)}>
+                    Batal
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={!wizardPackage}
+                    onClick={() => setWizardStep(2)}
+                    icon={ArrowRight}
+                  >
+                    Lanjut Pilih Peserta
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* LANGKAH 2 POP-UP: PENENTUAN PESERTA (KELAS / PER ORANG) */}
+            {wizardStep === 2 && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h5 className="font-extrabold text-slate-800 text-sm">
+                      Tentukan Peserta Ujian
+                    </h5>
+                    <p className="text-[11px] text-slate-500">
+                      Paket terpilih: <strong className="text-emerald-700">{wizardPackage}</strong> • Target saat ini: <strong className="text-blue-700">{wizardTargetParticipants.length} peserta</strong>
+                    </p>
+                  </div>
+
+                  {/* Toggle Mode: Pilih Kelas vs Pilih Per Orang */}
+                  <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setWizardTargetMode('class')}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                        wizardTargetMode === 'class'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Pilih Kelas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWizardTargetMode('individual')}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                        wizardTargetMode === 'individual'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Pilih Per Orang
+                    </button>
+                  </div>
+                </div>
+
+                {wizardTargetMode === 'class' ? (
+                  <div className="space-y-2.5">
+                    {dynamicClasses.length === 0 ? (
+                      <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-2xl text-slate-500">
+                        Belum ada data kelas/peserta terdaftar.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                        {dynamicClasses.map((cls) => {
+                          const count = participants.filter(
+                            p => (p.kelas || '').trim().toLowerCase() === cls.toLowerCase()
+                          ).length;
+                          const checked = wizardSelectedClasses.includes(cls);
+                          return (
+                            <label
+                              key={cls}
+                              className={`p-3.5 rounded-2xl border cursor-pointer flex items-center justify-between transition ${
+                                checked
+                                  ? 'bg-blue-50 border-blue-500 text-blue-950 font-bold'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleWizardClass(cls)}
+                                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                />
+                                <span>{cls}</span>
+                              </div>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600">
+                                {count} Peserta
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Cari nama, username, atau kelas peserta..."
+                          value={wizardSearch}
+                          onChange={(e) => setWizardSearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const ids = wizardFilteredIndividuals.map(p => p.participant_id);
+                          setWizardSelectedIds(Array.from(new Set([...wizardSelectedIds, ...ids])));
+                        }}
+                      >
+                        Pilih Semua ({wizardFilteredIndividuals.length})
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setWizardSelectedIds([])}
+                      >
+                        Kosongkan
+                      </Button>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-2xl divide-y divide-slate-100 bg-slate-50/40">
+                      {wizardFilteredIndividuals.map((p) => {
+                        const checked = wizardSelectedIds.includes(p.participant_id);
+                        return (
+                          <label
+                            key={p.participant_id}
+                            className={`flex items-center gap-3 px-3.5 py-2 cursor-pointer transition ${
+                              checked ? 'bg-blue-50 font-bold text-blue-950' : 'hover:bg-white text-slate-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleWizardParticipant(p.participant_id)}
+                              className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span className="block truncate">{p.full_name || p.username}</span>
+                              <span className="text-[10px] text-slate-400 font-mono font-normal">@{p.username}</span>
+                            </div>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600 shrink-0">
+                              {p.kelas || '-'}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <Button
+                    variant="secondary"
+                    icon={ArrowLeft}
+                    onClick={() => setWizardStep(1)}
+                  >
+                    Kembali ke Paket Soal
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={wizardTargetParticipants.length === 0}
+                    onClick={() => setWizardStep(3)}
+                    icon={ArrowRight}
+                  >
+                    Lanjut Tetapkan Final ({wizardTargetParticipants.length})
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* LANGKAH 3 POP-UP: REVIEW & TETAPKAN FINAL */}
+            {wizardStep === 3 && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
+                    <CheckCheck className="w-5 h-5 text-emerald-600" />
+                    <span>Konfirmasi Penetapan Final Pemetaan</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">1. Mata Ujian</span>
+                      <strong className="text-slate-900 block mt-0.5">{wizardSession.title}</strong>
+                      <span className="text-[11px] font-mono text-kemenag-700">Token: {wizardSession.token}</span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">2. Paket Soal</span>
+                      <strong className="text-emerald-800 block mt-0.5">{wizardPackage}</strong>
+                      <span className="text-[11px] text-slate-500">
+                        {questions.filter(q => (q.paket || '').trim().toLowerCase() === wizardPackage.toLowerCase()).length} Butir Soal
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">3. Peserta Sasaran</span>
+                      <strong className="text-blue-800 block mt-0.5">{wizardTargetParticipants.length} Peserta</strong>
+                      <span className="text-[11px] text-slate-500">
+                        {wizardTargetMode === 'class'
+                          ? `Kelas: ${wizardSelectedClasses.join(', ')}`
+                          : 'Pilihan Per Orang'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white/80 border border-emerald-100">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">
+                      Pratinjau Peserta yang Akan Menerima Soal Paket "{wizardPackage}":
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                      {wizardTargetParticipants.slice(0, 15).map((p) => (
+                        <span
+                          key={p.participant_id}
+                          className="px-2 py-0.5 rounded-lg bg-emerald-100/70 text-emerald-950 font-semibold text-[11px]"
+                        >
+                          {p.full_name || p.username}
+                        </span>
+                      ))}
+                      {wizardTargetParticipants.length > 15 && (
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-[11px]">
+                          +{wizardTargetParticipants.length - 15} peserta lainnya
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <Button
+                    variant="secondary"
+                    icon={ArrowLeft}
+                    disabled={savingMapping}
+                    onClick={() => setWizardStep(2)}
+                  >
+                    Ubah Peserta
+                  </Button>
+                  <Button
+                    variant="success"
+                    icon={CheckCheck}
+                    loading={savingMapping}
+                    onClick={handleFinalizeMapping}
+                  >
+                    Tetapkan Final & Simpan Pemetaan
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </AdminLayout>
   );
 };

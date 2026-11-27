@@ -6,24 +6,24 @@ export const ExamSubNav = ({ active = 1 }) => {
   const tabs = [
     {
       id: 1,
-      label: '1. Atur Ujian & Pemetaan Kelas',
-      path: '/admin/exam-setup',
-      icon: Sliders,
-      description: 'Pemetaan paket soal ke kelas sasaran'
+      label: '1. Data Mata Ujian / Kegiatan',
+      path: '/admin/sessions',
+      icon: Calendar,
+      description: 'Kelola sesi, buka/tutup, akhiri sesi & token'
     },
     {
       id: 2,
-      label: '2. Data Mata Ujian / Kegiatan',
-      path: '/admin/sessions',
-      icon: Calendar,
-      description: 'Kelola sesi, token & durasi pengerjaan'
-    },
-    {
-      id: 3,
-      label: '3. Data Bank Soal & Paket',
+      label: '2. Data Bank Soal & Paket',
       path: '/admin/questions',
       icon: BookOpen,
       description: 'Template Excel & bank soal per paket'
+    },
+    {
+      id: 3,
+      label: '3. Atur Ujian & Pemetaan',
+      path: '/admin/exam-setup',
+      icon: Sliders,
+      description: 'Rangkuman ujian, penentuan paket & peserta'
     }
   ];
 
