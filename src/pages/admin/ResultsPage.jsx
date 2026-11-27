@@ -23,7 +23,9 @@ import {
   XCircle,
   HelpCircle,
   Printer,
-  FileText
+  FileText,
+  Trash2,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export const ResultsPage = () => {
@@ -47,6 +49,18 @@ export const ResultsPage = () => {
   const [essayScoreInput, setEssayScoreInput] = useState(0);
   const [savingGrade, setSavingGrade] = useState(false);
   const [reviewFilter, setReviewFilter] = useState('all'); // 'all', 'correct', 'wrong', 'essay'
+
+  // State Pilihan & Hapus Nilai (Individu maupun Massal) dengan Unduh Excel & PDF Sebelum Hapus
+  const [selectedSubIds, setSelectedSubIds] = useState([]);
+  const [deleteModal, setDeleteModal] = useState({
+    open: false,
+    mode: 'single', // 'single' | 'bulk'
+    targets: [],
+    excelDownloaded: false,
+    pdfDownloaded: false
+  });
+  const [autoDownloadExcelOnDelete, setAutoDownloadExcelOnDelete] = useState(true);
+  const [deletingSubs, setDeletingSubs] = useState(false);
 
   useEffect(() => {
     if (!isAdminLoggedIn) {
@@ -387,9 +401,13 @@ export const ResultsPage = () => {
     printWindow.document.close();
   };
 
-  // Cetak / Unduh PDF LENGKAP Semua Peserta yang Sudah Mengerjakan
-  const handlePrintPdfAll = () => {
-    if (filteredSubmissions.length === 0) {
+  // Cetak / Unduh PDF LENGKAP Semua Peserta yang Sudah Mengerjakan (atau subset target)
+  const handlePrintPdfAll = (customSubmissions = null) => {
+    const targetList = Array.isArray(customSubmissions) && customSubmissions.length > 0
+      ? customSubmissions
+      : filteredSubmissions;
+
+    if (targetList.length === 0) {
       alert('Belum ada peserta yang mengumpulkan ujian untuk dicetak.');
       return;
     }
@@ -402,15 +420,15 @@ export const ResultsPage = () => {
 
     const sessionObj = sessions.find(s => s.session_id === selectedSession);
     const sessionTitle = sessionObj?.title || 'Semua Sesi Evaluasi Pelatihan Guru PAI';
-    const avgScore = filteredSubmissions.length > 0
-      ? (filteredSubmissions.reduce((acc, s) => acc + (Number(s.total_score) || 0), 0) / filteredSubmissions.length).toFixed(1)
+    const avgScore = targetList.length > 0
+      ? (targetList.reduce((acc, s) => acc + (Number(s.total_score) || 0), 0) / targetList.length).toFixed(1)
       : 0;
-    const maxScore = filteredSubmissions.length > 0
-      ? Math.max(...filteredSubmissions.map(s => Number(s.total_score) || 0))
+    const maxScore = targetList.length > 0
+      ? Math.max(...targetList.map(s => Number(s.total_score) || 0))
       : 0;
 
     // Halaman 1: Tabel Rekapitulasi Nilai Semua Peserta
-    const summaryRowsHtml = filteredSubmissions.map((sub, idx) => `
+    const summaryRowsHtml = targetList.map((sub, idx) => `
       <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
         <td style="padding: 6px 4px; text-align: center; font-weight: bold;">${idx + 1}</td>
         <td style="padding: 6px 8px;">
@@ -429,7 +447,7 @@ export const ResultsPage = () => {
     `).join('');
 
     // Halaman Selanjutnya: Lembar Rincian Butir Soal Per Peserta
-    const perParticipantPagesHtml = filteredSubmissions.map((sub) => {
+    const perParticipantPagesHtml = targetList.map((sub) => {
       const parsedAnswers = sub.parsedAnswers || {};
       let sessQuestions = questions.filter(q => q.session_id === sub.session_id);
       if (sessQuestions.length === 0 && Object.keys(parsedAnswers).length > 0) {
@@ -536,7 +554,7 @@ export const ResultsPage = () => {
         <div class="sub-title">${sessionTitle} • Dicetak pada ${new Date().toLocaleString('id-ID')}</div>
 
         <div class="stats-row">
-          <div class="stats-cell"><div class="metric-box"><div class="label">Total Peserta</div><div class="val">${filteredSubmissions.length}</div></div></div>
+          <div class="stats-cell"><div class="metric-box"><div class="label">Total Peserta</div><div class="val">${targetList.length}</div></div></div>
           <div class="stats-cell"><div class="metric-box" style="background:#ecfdf5;"><div class="label" style="color:#065f46;">Rata-rata Nilai</div><div class="val" style="color:#047857;">${avgScore}</div></div></div>
           <div class="stats-cell"><div class="metric-box"><div class="label">Nilai Tertinggi</div><div class="val" style="color:#0f766e;">${maxScore}</div></div></div>
           <div class="stats-cell"><div class="metric-box"><div class="label">Kelas Filter</div><div class="val" style="font-size:12px;">${selectedKelas === 'ALL' ? 'Semua Kelas' : selectedKelas}</div></div></div>
@@ -686,6 +704,122 @@ export const ResultsPage = () => {
     return matchSession && matchKelas && matchPaket && matchSearch;
   });
 
+  // Toggle pilih baris untuk hapus massal
+  const toggleSelectSub = (subId) => {
+    setSelectedSubIds(prev =>
+      prev.includes(subId) ? prev.filter(id => id !== subId) : [...prev, subId]
+    );
+  };
+
+  const toggleSelectAllSubs = () => {
+    const visibleIds = filteredSubmissions.map(s => s.submission_id);
+    if (visibleIds.length > 0 && visibleIds.every(id => selectedSubIds.includes(id))) {
+      setSelectedSubIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedSubIds(Array.from(new Set([...selectedSubIds, ...visibleIds])));
+    }
+  };
+
+  // Buka Modal Hapus Nilai Individu (menampilkan tombol unduh Excel & PDF peserta tsb sebelum hapus)
+  const handleOpenDeleteSingle = (sub) => {
+    setDeleteModal({
+      open: true,
+      mode: 'single',
+      targets: [sub],
+      excelDownloaded: false,
+      pdfDownloaded: false
+    });
+  };
+
+  // Buka Modal Hapus Nilai Massal (menggunakan baris tercentang, atau semua baris tampil jika belum ada yg dicentang)
+  const handleOpenDeleteBulk = () => {
+    const selectedTargets = filteredSubmissions.filter(s => selectedSubIds.includes(s.submission_id));
+    const targets = selectedTargets.length > 0 ? selectedTargets : filteredSubmissions;
+    if (targets.length === 0) {
+      alert('Tidak ada data nilai untuk dihapus.');
+      return;
+    }
+    setDeleteModal({
+      open: true,
+      mode: 'bulk',
+      targets,
+      excelDownloaded: false,
+      pdfDownloaded: false
+    });
+  };
+
+  // Unduh Excel khusus target yang akan dihapus
+  const handleDownloadTargetExcel = (targets = deleteModal.targets) => {
+    if (!targets || targets.length === 0) return;
+    const nowTag = new Date().toISOString().slice(0, 10);
+    if (targets.length === 1) {
+      const sub = targets[0];
+      const part = participants.find(p => p.participant_id === sub.participant_id || p.username === sub.participant_id);
+      const sess = sessions.find(s => s.session_id === sub.session_id);
+      const cleanName = (part?.full_name || sub.participantName || 'Peserta').replace(/[^a-zA-Z0-9_]/g, '_');
+      exportSingleParticipantResultToExcel(
+        sub,
+        questions,
+        part,
+        sess,
+        `Backup_Hapus_Nilai_${cleanName}_${nowTag}.xlsx`
+      );
+    } else {
+      exportDetailedResultsToExcel(
+        targets,
+        questions,
+        participants,
+        sessions,
+        `Backup_Hapus_Nilai_Massal_${targets.length}_Peserta_${nowTag}.xlsx`
+      );
+    }
+    setDeleteModal(prev => ({ ...prev, excelDownloaded: true }));
+  };
+
+  // Unduh PDF khusus target yang akan dihapus
+  const handleDownloadTargetPdf = () => {
+    const targets = deleteModal.targets || [];
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      handlePrintPdfIndividual(targets[0]);
+    } else {
+      handlePrintPdfAll(targets);
+    }
+    setDeleteModal(prev => ({ ...prev, pdfDownloaded: true }));
+  };
+
+  // Eksekusi Hapus Nilai ke Google Sheets (auto-backup Excel jika belum diunduh & dicentang)
+  const handleConfirmDeleteSubmissions = async () => {
+    const targets = deleteModal.targets || [];
+    if (targets.length === 0) return;
+
+    setDeletingSubs(true);
+    try {
+      if (autoDownloadExcelOnDelete && !deleteModal.excelDownloaded) {
+        handleDownloadTargetExcel(targets);
+      }
+      const ids = targets.map(t => t.submission_id);
+      const res = await gasApi.deleteSubmissions(adminSecretKey, ids);
+      alert(res.message || `Berhasil menghapus ${ids.length} data nilai peserta.`);
+      setDeleteModal({
+        open: false,
+        mode: 'single',
+        targets: [],
+        excelDownloaded: false,
+        pdfDownloaded: false
+      });
+      setSelectedSubIds(prev => prev.filter(id => !ids.includes(id)));
+      if (activeSub && ids.includes(activeSub.submission_id)) {
+        setActiveSub(null);
+      }
+      await loadData(true);
+    } catch (err) {
+      alert('Gagal menghapus data nilai: ' + err.message);
+    } finally {
+      setDeletingSubs(false);
+    }
+  };
+
   // Hitung detail pertanyaan untuk activeSub saat modal review terbuka (dengan robust fallback)
   const activeQuestions = activeSub
     ? (questions.filter(q => q.session_id === activeSub.session_id).length > 0
@@ -829,6 +963,22 @@ export const ResultsPage = () => {
             >
               Unduh Excel Massal (.xlsx)
             </Button>
+
+            {/* Tombol Hapus Nilai Massal / Terpilih */}
+            {filteredSubmissions.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Trash2}
+                onClick={handleOpenDeleteBulk}
+                title="Hapus nilai peserta secara massal (tersedia unduh Excel & PDF sebelum dihapus)"
+                className="border-rose-300 text-rose-700 hover:bg-rose-50 font-bold"
+              >
+                {selectedSubIds.filter(id => filteredSubmissions.some(s => s.submission_id === id)).length > 0
+                  ? `Hapus Terpilih (${selectedSubIds.filter(id => filteredSubmissions.some(s => s.submission_id === id)).length})`
+                  : `Hapus Nilai Massal (${filteredSubmissions.length})`}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -838,6 +988,18 @@ export const ResultsPage = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50/80 border-b border-slate-100 text-slate-600 font-bold">
                 <tr>
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredSubmissions.length > 0 &&
+                        filteredSubmissions.every(s => selectedSubIds.includes(s.submission_id))
+                      }
+                      onChange={toggleSelectAllSubs}
+                      className="rounded text-kemenag-600 focus:ring-kemenag-500"
+                      title="Pilih semua nilai yang tampil"
+                    />
+                  </th>
                   <th className="py-3 px-3 w-10 text-center">No</th>
                   <th className="py-3 px-4 min-w-[180px]">Peserta & NIP</th>
                   <th className="py-3 px-4 min-w-[120px]">Kelas</th>
@@ -848,19 +1010,32 @@ export const ResultsPage = () => {
                   <th className="py-3 px-4 text-center min-w-[130px]">Analisis PG (B/S)</th>
                   <th className="py-3 px-4 text-center min-w-[100px]">Pelanggaran</th>
                   <th className="py-3 px-4 min-w-[110px]">Waktu Selesai</th>
-                  <th className="py-3 px-4 text-center min-w-[140px]">Aksi</th>
+                  <th className="py-3 px-4 text-center min-w-[170px]">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {filteredSubmissions.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="p-10 text-center text-slate-400">
+                    <td colSpan={12} className="p-10 text-center text-slate-400">
                       Belum ada lembar jawaban yang dikumpulkan untuk kriteria yang dipilih.
                     </td>
                   </tr>
                 ) : (
-                  filteredSubmissions.map((sub, idx) => (
-                    <tr key={sub.submission_id} className="hover:bg-kemenag-50/40 transition">
+                  filteredSubmissions.map((sub, idx) => {
+                    const isChecked = selectedSubIds.includes(sub.submission_id);
+                    return (
+                    <tr
+                      key={sub.submission_id}
+                      className={`transition ${isChecked ? 'bg-rose-50/50' : 'hover:bg-kemenag-50/40'}`}
+                    >
+                      <td className="py-3.5 px-3 text-center align-top">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSelectSub(sub.submission_id)}
+                          className="rounded text-rose-600 focus:ring-rose-500 mt-0.5"
+                        />
+                      </td>
                       <td className="py-3.5 px-3 text-center font-bold text-slate-500 align-top">
                         {idx + 1}
                       </td>
@@ -938,7 +1113,7 @@ export const ResultsPage = () => {
                         {sub.submitted_at ? new Date(sub.submitted_at).toLocaleTimeString('id-ID') : '-'}
                       </td>
 
-                      {/* Aksi: Detail & Cetak PDF Langsung */}
+                      {/* Aksi: Detail, Cetak PDF, & Hapus Nilai Individu */}
                       <td className="py-3.5 px-4 text-center align-top">
                         <div className="flex items-center justify-center gap-1.5">
                           <Button
@@ -958,10 +1133,18 @@ export const ResultsPage = () => {
                           >
                             <Printer className="w-4 h-4 text-slate-600" />
                           </button>
+                          <button
+                            onClick={() => handleOpenDeleteSingle(sub)}
+                            className="p-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 transition border border-rose-200"
+                            title="Hapus Nilai Peserta Ini (Unduh Excel & PDF tersedia sebelum dihapus)"
+                          >
+                            <Trash2 className="w-4 h-4 text-rose-600" />
+                          </button>
                         </div>
                       </td>
                     </tr>
-                  ))
+                  );
+                  })
                 )}
               </tbody>
             </table>
@@ -1294,6 +1477,14 @@ export const ResultsPage = () => {
 
               <div className="flex gap-2 w-full sm:w-auto">
                 <Button
+                  variant="outline"
+                  className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                  icon={Trash2}
+                  onClick={() => handleOpenDeleteSingle(activeSub)}
+                >
+                  Hapus Nilai
+                </Button>
+                <Button
                   variant="secondary"
                   className="w-full sm:w-auto"
                   onClick={() => setActiveSub(null)}
@@ -1305,6 +1496,131 @@ export const ResultsPage = () => {
           </div>
         </Modal>
       )}
+
+      {/* Modal Konfirmasi Hapus Nilai (Individu / Massal) + Unduh Excel & PDF Terkait Sebelum Hapus */}
+      <Modal
+        isOpen={deleteModal.open}
+        onClose={() => !deletingSubs && setDeleteModal(prev => ({ ...prev, open: false }))}
+        title={
+          deleteModal.mode === 'single'
+            ? `Hapus Nilai: ${deleteModal.targets[0]?.participantName || 'Peserta'}`
+            : `Hapus Nilai Massal (${deleteModal.targets.length} Peserta)`
+        }
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-4 text-xs">
+          {/* Ringkasan Data yang Akan Dihapus */}
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 flex-1 min-w-0">
+              <h5 className="font-extrabold text-rose-950 text-sm">
+                Konfirmasi Penghapusan Data Nilai ({deleteModal.targets.length} Submisi)
+              </h5>
+              <p className="text-rose-800 leading-relaxed">
+                {deleteModal.mode === 'single'
+                  ? `Nilai dan lembar jawaban atas nama "${deleteModal.targets[0]?.participantName}" (Skor Total: ${deleteModal.targets[0]?.total_score || 0}) akan dihapus permanen dari database.`
+                  : `Sebanyak ${deleteModal.targets.length} data nilai & lembar jawaban peserta terpilih akan dihapus permanen dari database.`}
+              </p>
+              {deleteModal.targets.length > 1 && (
+                <div className="flex flex-wrap gap-1.5 pt-1.5 max-h-24 overflow-y-auto">
+                  {deleteModal.targets.slice(0, 12).map((t) => (
+                    <span
+                      key={t.submission_id}
+                      className="px-2 py-0.5 rounded-lg bg-white border border-rose-200 text-rose-900 font-semibold text-[11px]"
+                    >
+                      {t.participantName} ({t.total_score})
+                    </span>
+                  ))}
+                  {deleteModal.targets.length > 12 && (
+                    <span className="px-2 py-0.5 rounded-lg bg-rose-100 text-rose-900 font-bold text-[11px]">
+                      +{deleteModal.targets.length - 12} peserta lainnya
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bagian Wajib Muncul Sebelum Hapus: Unduh Excel & PDF yang Bersangkutan */}
+          <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                <Download className="w-4 h-4 text-emerald-700" />
+                Unduh Arsip Nilai Terkait Sebelum Menghapus:
+              </span>
+              {(deleteModal.excelDownloaded || deleteModal.pdfDownloaded) && (
+                <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200">
+                  Siap Arsip ✓
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Button
+                type="button"
+                variant="secondary"
+                icon={FileSpreadsheet}
+                onClick={() => handleDownloadTargetExcel()}
+                className="justify-center border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100 font-bold"
+              >
+                {deleteModal.excelDownloaded
+                  ? 'Excel Terunduh ✓'
+                  : deleteModal.mode === 'single'
+                    ? 'Unduh Excel Peserta (.xlsx)'
+                    : `Unduh Excel Massal (${deleteModal.targets.length})`}
+              </Button>
+
+              <Button
+                type="button"
+                variant="primary"
+                icon={Printer}
+                onClick={handleDownloadTargetPdf}
+                className="justify-center font-bold"
+              >
+                {deleteModal.pdfDownloaded
+                  ? 'PDF Dibuka ✓'
+                  : deleteModal.mode === 'single'
+                    ? 'Unduh PDF Peserta (.pdf)'
+                    : `Unduh PDF Lengkap (${deleteModal.targets.length})`}
+              </Button>
+            </div>
+
+            <label className="flex items-center gap-2 pt-1 cursor-pointer text-[11px] text-emerald-900 font-medium">
+              <input
+                type="checkbox"
+                checked={autoDownloadExcelOnDelete}
+                onChange={(e) => setAutoDownloadExcelOnDelete(e.target.checked)}
+                className="rounded text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>Otomatis unduh file Excel (.xlsx) cadangan jika belum diunduh saat menekan Hapus Nilai</span>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={deletingSubs}
+              onClick={() => setDeleteModal(prev => ({ ...prev, open: false }))}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              icon={Trash2}
+              loading={deletingSubs}
+              onClick={handleConfirmDeleteSubmissions}
+            >
+              {deletingSubs
+                ? 'Menghapus...'
+                : deleteModal.mode === 'single'
+                  ? 'Hapus Nilai Peserta Ini'
+                  : `Hapus ${deleteModal.targets.length} Nilai Sekarang`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AdminLayout>
   );
 };

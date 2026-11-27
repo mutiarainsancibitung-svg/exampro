@@ -1247,6 +1247,56 @@ export const gasApi = {
   },
 
   /**
+   * Hapus Nilai / Submisi (Individu maupun Massal)
+   */
+  async deleteSubmissions(secretKey, submissionIds = []) {
+    if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+      throw new Error('Pilih minimal satu nilai yang akan dihapus.');
+    }
+
+    if (!this.isConfigured()) {
+      const db = getMockDb();
+      const idSet = new Set(submissionIds.map(id => String(id).trim()));
+      const removed = (db.submissions || []).filter(s => idSet.has(String(s.submission_id).trim()));
+      db.submissions = (db.submissions || []).filter(s => !idSet.has(String(s.submission_id).trim()));
+
+      removed.forEach(rem => {
+        const stillHas = (db.submissions || []).some(
+          s => s.session_id === rem.session_id &&
+               String(s.participant_id).toLowerCase() === String(rem.participant_id).toLowerCase()
+        );
+        if (!stillHas) {
+          db.participants = (db.participants || []).map(p => {
+            const matchPid = String(p.participant_id).toLowerCase() === String(rem.participant_id).toLowerCase() ||
+                             String(p.username).toLowerCase() === String(rem.participant_id).toLowerCase();
+            if (matchPid && (!p.session_id || p.session_id === rem.session_id)) {
+              return { ...p, status: 'registered', token_used: '', start_time: '' };
+            }
+            return p;
+          });
+        }
+      });
+
+      saveMockDb(db);
+      this.clearDashboardCache();
+      return {
+        status: 'success',
+        deletedCount: removed.length,
+        message: `Berhasil menghapus ${removed.length} data nilai (mode lokal).`
+      };
+    }
+
+    const response = await fetch(getGasApiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'deleteSubmissions', secretKey, submissionIds })
+    });
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Gagal menghapus data nilai');
+    this.clearDashboardCache();
+    return data;
+  },
+
+  /**
    * Upload Media Gambar ke Google Drive
    */
   async uploadMedia(secretKey, file) {

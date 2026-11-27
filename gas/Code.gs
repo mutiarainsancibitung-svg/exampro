@@ -132,6 +132,9 @@ function doPost(e) {
       case 'gradeEssay':
         responseData = handleGradeEssay(payload);
         break;
+      case 'deleteSubmissions':
+        responseData = handleDeleteSubmissions(payload);
+        break;
       case 'uploadMedia':
         responseData = handleUploadMedia(payload);
         break;
@@ -1666,6 +1669,114 @@ function handleGradeEssay(payload) {
     }
   }
   return { status: 'error', message: 'Submission tidak ditemukan' };
+}
+
+/**
+ * Hapus Data Nilai / Submisi (Individu maupun Massal)
+ */
+function handleDeleteSubmissions(payload) {
+  const { secretKey, submissionIds } = payload;
+  if (!verifyAdminSecret(secretKey)) return { status: 'error', message: 'Akses ditolak' };
+  if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+    return { status: 'error', message: 'Tidak ada data nilai yang dipilih untuk dihapus' };
+  }
+
+  const ss = getSpreadsheet();
+  const subSheet = ss.getSheetByName(SHEETS.SUBMISSIONS);
+  if (!subSheet || subSheet.getLastRow() <= 1) {
+    return { status: 'error', message: 'Data nilai pada sheet Submissions sudah kosong' };
+  }
+
+  const targetIdSet = {};
+  submissionIds.forEach(function(id) {
+    targetIdSet[String(id).trim()] = true;
+  });
+
+  const subRows = subSheet.getDataRange().getValues();
+  const rowsToDelete = [];
+  const deletedRefs = [];
+
+  for (let i = 1; i < subRows.length; i++) {
+    const sId = String(subRows[i][0] || '').trim();
+    if (targetIdSet[sId]) {
+      rowsToDelete.push(i + 1);
+      deletedRefs.push({
+        submissionId: sId,
+        participantId: String(subRows[i][1] || '').trim(),
+        sessionId: String(subRows[i][2] || '').trim()
+      });
+    }
+  }
+
+  if (rowsToDelete.length === 0) {
+    return { status: 'error', message: 'Data nilai yang dipilih tidak ditemukan di Google Sheets' };
+  }
+
+  // Hapus dari baris paling bawah agar indeks tidak bergeser
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  rowsToDelete.forEach(function(rowIdx) {
+    subSheet.deleteRow(rowIdx);
+  });
+
+  // Kembalikan status peserta terkait ke 'registered' jika tidak memiliki submisi tersisa pada sesi tsb
+  const remainingSubs = getSheetDataAsObjects(SHEETS.SUBMISSIONS, ss);
+  const partSheet = ss.getSheetByName(SHEETS.PARTICIPANTS);
+  if (partSheet && partSheet.getLastRow() > 1) {
+    const partData = partSheet.getDataRange().getValues();
+    const statusCol = HEADERS.Participants.indexOf('status') + 1;
+    const startCol = HEADERS.Participants.indexOf('start_time') + 1;
+    const tokenCol = HEADERS.Participants.indexOf('token_used') + 1;
+    const sessCol = HEADERS.Participants.indexOf('session_id') + 1;
+
+    deletedRefs.forEach(function(ref) {
+      const pLower = ref.participantId.toLowerCase();
+      const stillHasSub = remainingSubs.some(function(s) {
+        return String(s.session_id || '').trim() === ref.sessionId &&
+               String(s.participant_id || '').trim().toLowerCase() === pLower;
+      });
+      if (stillHasSub) return;
+
+      for (let r = 1; r < partData.length; r++) {
+        const rPId = String(partData[r][0] || '').trim().toLowerCase();
+        const rUser = String(partData[r][2] || '').trim().toLowerCase();
+        const rIdent = String(partData[r][6] || '').trim().toLowerCase();
+        const rSess = sessCol > 0 ? String(partData[r][sessCol - 1] || '').trim() : '';
+
+        if ((rPId === pLower || rUser === pLower || rIdent === pLower) && (!rSess || rSess === ref.sessionId)) {
+          if (statusCol > 0) partSheet.getRange(r + 1, statusCol).setValue('registered');
+          if (startCol > 0) partSheet.getRange(r + 1, startCol).setValue('');
+          if (tokenCol > 0) partSheet.getRange(r + 1, tokenCol).setValue('');
+        }
+      }
+    });
+  }
+
+  // Bersihkan entri cache proctor sesi terkait
+  try {
+    const cache = CacheService.getScriptCache();
+    deletedRefs.forEach(function(ref) {
+      if (ref.sessionId) {
+        const key = 'proctor_' + ref.sessionId;
+        const cachedStr = cache.get(key);
+        if (cachedStr) {
+          try {
+            const pData = JSON.parse(cachedStr);
+            delete pData[ref.participantId];
+            delete pData[ref.participantId.toLowerCase()];
+            cache.put(key, JSON.stringify(pData), 10800);
+          } catch (e) {}
+        }
+      }
+    });
+  } catch (e) {}
+
+  clearExamCache();
+
+  return {
+    status: 'success',
+    deletedCount: rowsToDelete.length,
+    message: `Berhasil menghapus ${rowsToDelete.length} data nilai peserta.`
+  };
 }
 
 function handleUploadMedia(payload) {
