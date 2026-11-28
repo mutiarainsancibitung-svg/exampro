@@ -463,8 +463,8 @@ export const ParticipantsPage = () => {
               variant="secondary"
               size="sm"
               icon={Download}
-              onClick={downloadParticipantExcelTemplate}
-              title="Unduh file template Excel (.xlsx)"
+              onClick={() => downloadParticipantExcelTemplate({ classes: dynamicClasses })}
+              title="Unduh file template Excel (.xlsx) dengan dropdown Jenis Kelamin, Kelas & Keterangan Disabilitas"
               className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
             >
               Template Excel
@@ -817,10 +817,10 @@ export const ParticipantsPage = () => {
               Kolom wajib: <code>No, Username, Password, Nama_Lengkap, Jenis_Kelamin, NIP_NIM, Kelas, Asal_Madrasah_Sekolah</code>. Kolom opsional baru: <code>Keterangan_Disabilitas, Catatan_Kebutuhan_Khusus</code>.
             </p>
             <p className="text-emerald-800">
-              Jika <strong>Jenis_Kelamin</strong> dikosongkan pada Excel, sistem otomatis mengisinya dengan tanda strip (<strong>-</strong>).
+              Kolom <strong>Jenis_Kelamin</strong>, <strong>Kelas</strong>, dan <strong>Keterangan_Disabilitas</strong> sudah dilengkapi <strong>dropdown pilihan di Excel</strong> sehingga tinggal klik pilih.
             </p>
             <button
-              onClick={downloadParticipantExcelTemplate}
+              onClick={() => downloadParticipantExcelTemplate({ classes: dynamicClasses })}
               className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
             >
               Unduh Template Data Peserta (.xlsx) Di Sini

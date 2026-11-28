@@ -3,7 +3,49 @@
  * Menggunakan library SheetJS (XLSX) untuk menghasilkan file Microsoft Excel (.xlsx) asli.
  */
 import * as XLSX from 'xlsx';
-import { normalizeDisabilityType, getDisabilityMeta } from './disabilityConfig';
+import { DISABILITY_CATEGORIES, normalizeDisabilityType, getDisabilityMeta } from './disabilityConfig.js';
+import { downloadWorkbookWithValidations } from './xlsxDataValidation.js';
+
+const safeTemplateOptions = (arg) => {
+  if (!arg || typeof arg !== 'object' || arg.nativeEvent || arg.target) {
+    return {};
+  }
+  return arg;
+};
+
+const uniqueCleanList = (items = []) => {
+  const seen = new Set();
+  const out = [];
+  items.forEach((item) => {
+    const clean = String(item || '').trim().replace(/,/g, ' ');
+    if (clean && !seen.has(clean.toLowerCase())) {
+      seen.add(clean.toLowerCase());
+      out.push(clean);
+    }
+  });
+  return out;
+};
+
+const buildListValidationConfig = ({ sqref, values, refColLetter, refSheetName = 'Petunjuk_Pilihan', errorStyle = 'warning', promptTitle = '', prompt = '', errorTitle = '', error = '' }) => {
+  const cleanVals = uniqueCleanList(values);
+  const inlineStr = cleanVals.join(',');
+  const base = {
+    sqref,
+    errorStyle,
+    allowBlank: true,
+    promptTitle,
+    prompt,
+    errorTitle,
+    error
+  };
+  if (inlineStr.length <= 220) {
+    return { ...base, options: cleanVals };
+  }
+  return {
+    ...base,
+    formulaRef: `${refSheetName}!$${refColLetter}$2:$${refColLetter}$${cleanVals.length + 1}`
+  };
+};
 
 // ==========================================
 // 1. BANK SOAL TEMPLATE (.xlsx)
@@ -84,18 +126,18 @@ export const SAMPLE_QUESTIONS = [
 ];
 
 /**
- * Unduh File Asli Microsoft Excel (.xlsx) untuk Bank Soal
+ * Bangun Workbook Bank Soal + Data Validation Dropdown Tertanam
  */
-export const downloadExcelTemplate = () => {
+export const createQuestionBankWorkbookPayload = (rowsData, options = {}) => {
+  const { sheetName = 'Bank_Soal_PAI', packages = [] } = safeTemplateOptions(options);
   const wb = XLSX.utils.book_new();
-  const wsData = [QUESTION_HEADERS, ...SAMPLE_QUESTIONS];
+  const wsData = [QUESTION_HEADERS, ...rowsData];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-  // Lebar kolom rapi
   ws['!cols'] = [
     { wch: 6 },  // No
-    { wch: 14 }, // Paket
-    { wch: 16 }, // Jenis_Soal
+    { wch: 16 }, // Paket
+    { wch: 18 }, // Jenis_Soal
     { wch: 45 }, // Teks_Soal
     { wch: 25 }, // Gambar_URL
     { wch: 30 }, // Opsi_A
@@ -103,19 +145,97 @@ export const downloadExcelTemplate = () => {
     { wch: 30 }, // Opsi_C
     { wch: 30 }, // Opsi_D
     { wch: 30 }, // Opsi_E
-    { wch: 15 }, // Kunci_Jawaban
-    { wch: 8 }   // Bobot
+    { wch: 16 }, // Kunci_Jawaban
+    { wch: 10 }  // Bobot
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Bank_Soal_PAI');
-  XLSX.writeFile(wb, 'Template_Bank_Soal_ExamPro_PAI.xlsx');
+  const paketList = uniqueCleanList(['Pretest', 'Postest', 'Paket A', 'Paket B', ...packages]);
+  const jenisList = ['single_choice', 'multiple_choice', 'essay'];
+  const kunciList = ['A', 'B', 'C', 'D', 'E'];
+  const bobotList = ['1', '2', '3', '4', '5', '10', '20', '25'];
+
+  // Sheet Petunjuk & Daftar Referensi Pilihan
+  const maxRefRows = Math.max(paketList.length, jenisList.length, kunciList.length, bobotList.length);
+  const refRows = [['Daftar_Paket', 'Jenis_Soal', 'Kunci_Jawaban_PG', 'Bobot_Standar', 'Keterangan_Pengisian']];
+  for (let i = 0; i < maxRefRows; i++) {
+    refRows.push([
+      paketList[i] || '',
+      jenisList[i] || '',
+      kunciList[i] || '',
+      bobotList[i] || '',
+      i === 0
+        ? 'Kolom B, C, K, dan L pada sheet utama sudah dilengkapi dropdown pilihan (baris 2 s.d. 501).'
+        : i === 1
+          ? 'Untuk multiple_choice, isi Kunci_Jawaban misal A,B,C; untuk essay isi rubrik singkat.'
+          : ''
+    ]);
+  }
+  const refWs = XLSX.utils.aoa_to_sheet(refRows);
+  refWs['!cols'] = [{ wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 16 }, { wch: 60 }];
+
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.utils.book_append_sheet(wb, refWs, 'Petunjuk_Pilihan');
+
+  const maxRow = Math.max(501, rowsData.length + 100);
+  const validationsBySheet = {
+    'xl/worksheets/sheet1.xml': [
+      buildListValidationConfig({
+        sqref: `B2:B${maxRow}`,
+        values: paketList,
+        refColLetter: 'A',
+        errorStyle: 'warning',
+        promptTitle: 'Pilih / Ketik Paket Soal',
+        prompt: 'Pilih nama paket dari dropdown (atau ketik nama paket baru).'
+      }),
+      buildListValidationConfig({
+        sqref: `C2:C${maxRow}`,
+        values: jenisList,
+        refColLetter: 'B',
+        errorStyle: 'stop',
+        promptTitle: 'Pilih Jenis Soal',
+        prompt: 'Pilih: single_choice (PG Tunggal), multiple_choice (PG Jamak), atau essay.',
+        errorTitle: 'Jenis Soal Tidak Valid',
+        error: 'Harap pilih salah satu dari daftar: single_choice, multiple_choice, atau essay.'
+      }),
+      buildListValidationConfig({
+        sqref: `K2:K${maxRow}`,
+        values: kunciList,
+        refColLetter: 'C',
+        errorStyle: 'warning',
+        promptTitle: 'Kunci Jawaban',
+        prompt: 'Pilih A-E untuk PG tunggal, ketik A,B,C untuk PG jamak, atau ketik rubrik untuk essay.'
+      }),
+      buildListValidationConfig({
+        sqref: `L2:L${maxRow}`,
+        values: bobotList,
+        refColLetter: 'D',
+        errorStyle: 'warning',
+        promptTitle: 'Bobot Nilai Soal',
+        prompt: 'Pilih bobot standar dari dropdown atau ketik angka bobot soal.'
+      })
+    ]
+  };
+
+  return { wb, validationsBySheet };
 };
 
 /**
- * Unduh File Excel (.xlsx) untuk Backup Butir Soal per Paket
+ * Unduh File Asli Microsoft Excel (.xlsx) untuk Bank Soal (Dengan Dropdown Tertanam)
  */
-export const exportQuestionsToExcel = (questions, filename = 'Backup_Soal.xlsx') => {
-  const wb = XLSX.utils.book_new();
+export const downloadExcelTemplate = (options = {}) => {
+  const cleanOpts = safeTemplateOptions(options);
+  const { wb, validationsBySheet } = createQuestionBankWorkbookPayload(SAMPLE_QUESTIONS, {
+    sheetName: 'Bank_Soal_PAI',
+    packages: cleanOpts.packages || []
+  });
+  return downloadWorkbookWithValidations(wb, 'Template_Bank_Soal_ExamPro_PAI.xlsx', validationsBySheet);
+};
+
+/**
+ * Unduh File Excel (.xlsx) untuk Backup Butir Soal per Paket (Dengan Dropdown Tertanam)
+ */
+export const exportQuestionsToExcel = (questions, filename = 'Backup_Soal.xlsx', options = {}) => {
+  const cleanOpts = safeTemplateOptions(options);
   const rows = (questions || []).map((q, idx) => {
     let opts = [];
     try {
@@ -145,26 +265,12 @@ export const exportQuestionsToExcel = (questions, filename = 'Backup_Soal.xlsx')
     ];
   });
 
-  const wsData = [QUESTION_HEADERS, ...rows];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  ws['!cols'] = [
-    { wch: 6 },  // No
-    { wch: 14 }, // Paket
-    { wch: 16 }, // Jenis_Soal
-    { wch: 45 }, // Teks_Soal
-    { wch: 25 }, // Gambar_URL
-    { wch: 30 }, // Opsi_A
-    { wch: 30 }, // Opsi_B
-    { wch: 30 }, // Opsi_C
-    { wch: 30 }, // Opsi_D
-    { wch: 30 }, // Opsi_E
-    { wch: 15 }, // Kunci_Jawaban
-    { wch: 8 }   // Bobot
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Bank_Soal');
-  XLSX.writeFile(wb, filename);
+  const paketFromData = (questions || []).map(q => q.paket).filter(Boolean);
+  const { wb, validationsBySheet } = createQuestionBankWorkbookPayload(rows, {
+    sheetName: 'Bank_Soal',
+    packages: [...(cleanOpts.packages || []), ...paketFromData]
+  });
+  return downloadWorkbookWithValidations(wb, filename, validationsBySheet);
 };
 
 /**
@@ -321,11 +427,12 @@ export const SAMPLE_PARTICIPANTS = [
 ];
 
 /**
- * Unduh File Asli Microsoft Excel (.xlsx) untuk Data Peserta
+ * Bangun Workbook Data Peserta + Data Validation Dropdown Tertanam
  */
-export const downloadParticipantExcelTemplate = () => {
+export const createParticipantWorkbookPayload = (rowsData, options = {}) => {
+  const { sheetName = 'Data_Peserta', classes = [] } = safeTemplateOptions(options);
   const wb = XLSX.utils.book_new();
-  const wsData = [PARTICIPANT_HEADERS, ...SAMPLE_PARTICIPANTS];
+  const wsData = [PARTICIPANT_HEADERS, ...rowsData];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
 
   ws['!cols'] = [
@@ -335,21 +442,87 @@ export const downloadParticipantExcelTemplate = () => {
     { wch: 32 }, // Nama_Lengkap
     { wch: 15 }, // Jenis_Kelamin
     { wch: 22 }, // NIP_NIM
-    { wch: 14 }, // Kelas
+    { wch: 16 }, // Kelas
     { wch: 30 }, // Asal_Madrasah_Sekolah
     { wch: 24 }, // Keterangan_Disabilitas
     { wch: 32 }  // Catatan_Kebutuhan_Khusus
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Data_Peserta');
-  XLSX.writeFile(wb, 'Template_Data_Peserta_PAI.xlsx');
+  const genderList = ['Laki-Laki', 'Perempuan', '-'];
+  const classList = uniqueCleanList(['Kelas A', 'Kelas B', 'Kelas C', 'Kelas D', ...classes]);
+  const disabilityList = DISABILITY_CATEGORIES.map(c => c.shortLabel);
+
+  const maxRefRows = Math.max(genderList.length, classList.length, disabilityList.length);
+  const refRows = [['Jenis_Kelamin', 'Daftar_Kelas', 'Keterangan_Disabilitas', 'Penyesuaian_Otomatis']];
+  for (let i = 0; i < maxRefRows; i++) {
+    const cat = DISABILITY_CATEGORIES[i];
+    refRows.push([
+      genderList[i] || '',
+      classList[i] || '',
+      disabilityList[i] || '',
+      cat ? cat.needsSummary : ''
+    ]);
+  }
+  const refWs = XLSX.utils.aoa_to_sheet(refRows);
+  refWs['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 24 }, { wch: 68 }];
+
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.utils.book_append_sheet(wb, refWs, 'Petunjuk_Pilihan');
+
+  const maxRow = Math.max(501, rowsData.length + 100);
+  const validationsBySheet = {
+    'xl/worksheets/sheet1.xml': [
+      buildListValidationConfig({
+        sqref: `E2:E${maxRow}`,
+        values: genderList,
+        refColLetter: 'A',
+        errorStyle: 'stop',
+        promptTitle: 'Pilih Jenis Kelamin',
+        prompt: 'Pilih dari dropdown: Laki-Laki, Perempuan, atau -.',
+        errorTitle: 'Input Jenis Kelamin',
+        error: 'Harap pilih Laki-Laki, Perempuan, atau -.'
+      }),
+      buildListValidationConfig({
+        sqref: `G2:G${maxRow}`,
+        values: classList,
+        refColLetter: 'B',
+        errorStyle: 'warning',
+        promptTitle: 'Pilih / Ketik Kelas',
+        prompt: 'Pilih kelas dari dropdown atau ketik nama kelas baru sesuai kebutuhan.'
+      }),
+      buildListValidationConfig({
+        sqref: `I2:I${maxRow}`,
+        values: disabilityList,
+        refColLetter: 'C',
+        errorStyle: 'stop',
+        promptTitle: 'Pilih Keterangan Disabilitas',
+        prompt: 'Pilih Non-Disabilitas atau kategori disabilitas agar sistem ujian menyesuaikan aturan tab & aksesibilitas.',
+        errorTitle: 'Kategori Disabilitas Tidak Valid',
+        error: 'Harap pilih salah satu kategori dari daftar dropdown Keterangan Disabilitas.'
+      })
+    ]
+  };
+
+  return { wb, validationsBySheet };
 };
 
 /**
- * Unduh File Excel (.xlsx) Seluruh Data Peserta untuk Cadangan (Backup)
+ * Unduh File Asli Microsoft Excel (.xlsx) untuk Data Peserta (Dengan Dropdown Tertanam)
  */
-export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta_ExamPro.xlsx') => {
-  const wb = XLSX.utils.book_new();
+export const downloadParticipantExcelTemplate = (options = {}) => {
+  const cleanOpts = safeTemplateOptions(options);
+  const { wb, validationsBySheet } = createParticipantWorkbookPayload(SAMPLE_PARTICIPANTS, {
+    sheetName: 'Data_Peserta',
+    classes: cleanOpts.classes || []
+  });
+  return downloadWorkbookWithValidations(wb, 'Template_Data_Peserta_PAI.xlsx', validationsBySheet);
+};
+
+/**
+ * Unduh File Excel (.xlsx) Seluruh Data Peserta untuk Cadangan (Dengan Dropdown Tertanam)
+ */
+export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta_ExamPro.xlsx', options = {}) => {
+  const cleanOpts = safeTemplateOptions(options);
   const rows = (participants || []).map((p, idx) => [
     idx + 1,
     p.username || '',
@@ -363,24 +536,12 @@ export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta
     p.disability_note || ''
   ]);
 
-  const wsData = [PARTICIPANT_HEADERS, ...rows];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  ws['!cols'] = [
-    { wch: 6 },
-    { wch: 18 },
-    { wch: 16 },
-    { wch: 32 },
-    { wch: 15 },
-    { wch: 22 },
-    { wch: 14 },
-    { wch: 30 },
-    { wch: 24 },
-    { wch: 32 }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Peserta');
-  XLSX.writeFile(wb, filename);
+  const classFromData = (participants || []).map(p => p.kelas).filter(c => c && c !== '-');
+  const { wb, validationsBySheet } = createParticipantWorkbookPayload(rows, {
+    sheetName: 'Peserta',
+    classes: [...(cleanOpts.classes || []), ...classFromData]
+  });
+  return downloadWorkbookWithValidations(wb, filename, validationsBySheet);
 };
 
 /**

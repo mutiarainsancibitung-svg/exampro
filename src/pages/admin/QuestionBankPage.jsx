@@ -483,8 +483,8 @@ export const QuestionBankPage = () => {
               variant="secondary"
               size="sm"
               icon={Download}
-              onClick={downloadExcelTemplate}
-              title="Unduh file template Excel (.xlsx)"
+              onClick={() => downloadExcelTemplate({ packages: allPackages })}
+              title="Unduh file template Excel (.xlsx) dengan dropdown Paket, Jenis Soal, Kunci Jawaban & Bobot"
               className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
             >
               Download Template Excel (.xlsx)
@@ -810,10 +810,10 @@ export const QuestionBankPage = () => {
                 Kolom template: <code>No, Paket, Jenis_Soal, Teks_Soal, Gambar_URL, Opsi_A, Opsi_B, Opsi_C, Opsi_D, Opsi_E, Kunci_Jawaban, Bobot</code>.
               </p>
               <p className="text-emerald-800">
-                Isi kolom <strong>Paket</strong> dengan <strong>Pretest</strong> atau <strong>Postest</strong>. Soal akan otomatis terkelompokkan ke dalam paket masing-masing saat diimpor!
+                Template sudah dilengkapi <strong>dropdown pilihan langsung di Excel</strong> untuk kolom <strong>Paket</strong>, <strong>Jenis_Soal</strong>, <strong>Kunci_Jawaban</strong>, dan <strong>Bobot</strong>.
               </p>
               <button
-                onClick={downloadExcelTemplate}
+                onClick={() => downloadExcelTemplate({ packages: allPackages })}
                 className="text-emerald-700 font-bold underline hover:text-emerald-900 inline-block pt-1"
               >
                 Unduh Template Bank Soal Di Sini (.xlsx)
