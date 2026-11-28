@@ -272,6 +272,8 @@ export const gasApi = {
 
       const finalPaket = paket || existingPart?.paket || 'Pretest';
       const finalKelas = kelas || existingPart?.kelas || 'Kelas A';
+      const finalDisabilityType = existingPart?.disability_type || 'none';
+      const finalDisabilityNote = existingPart?.disability_note || '';
 
       if (existingPart) {
         existingPart.session_id = sess.session_id;
@@ -290,13 +292,24 @@ export const gasApi = {
           gender: gender || '-',
           kelas: finalKelas,
           paket: finalPaket,
+          disability_type: finalDisabilityType,
+          disability_note: finalDisabilityNote,
           token_used: token,
           start_time: startTime,
           status: 'in_progress'
         });
       }
       saveMockDb(db);
-      return { status: 'success', participantId, startTime, session: sess, paket: finalPaket, kelas: finalKelas };
+      return {
+        status: 'success',
+        participantId,
+        startTime,
+        session: sess,
+        paket: finalPaket,
+        kelas: finalKelas,
+        disability_type: finalDisabilityType,
+        disability_note: finalDisabilityNote
+      };
     }
 
     const response = await fetch(getGasApiUrl(), {
@@ -595,6 +608,8 @@ export const gasApi = {
           kelas: p.kelas || 'Kelas A',
           institution: p.institution || '',
           paket: p.paket || 'Pretest',
+          disability_type: p.disability_type || 'none',
+          disability_note: p.disability_note || '',
           start_time: p.start_time,
           status,
           is_online: isOnline,

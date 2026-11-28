@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '../ui/Card';
 import { OptionItem } from './OptionItem';
-import { Flag, ZoomIn, X, Type, ArrowDown, ArrowUp } from 'lucide-react';
+import { Flag, ZoomIn, X, Type, ArrowDown, ArrowUp, Volume2, Square } from 'lucide-react';
 
 export const QuestionCard = ({
   questionNumber,
@@ -14,13 +14,42 @@ export const QuestionCard = ({
   minFontSize = 14,
   maxFontSize = 28,
   onDecreaseFont,
-  onIncreaseFont
+  onIncreaseFont,
+  themeMode = 'normal',
+  dyslexiaSpacing = false,
+  largeHitTargets = false,
+  showAudioControls = false,
+  isSpeaking = false,
+  onToggleSpeak
 }) => {
   const [showImgModal, setShowImgModal] = useState(false);
 
   if (!question) return null;
 
   const resolvedFontSize = `${fontSizePx}px`;
+  const isHighContrast = themeMode === 'high_contrast';
+  const isDark = themeMode === 'dark';
+  const isCream = themeMode === 'dyslexia_cream';
+
+  const cardThemeClass = isHighContrast
+    ? 'bg-black border-yellow-400 text-yellow-200'
+    : isDark
+      ? 'bg-slate-900 border-slate-700 text-slate-100'
+      : isCream
+        ? 'bg-[#FDFBF4] border-amber-200 text-slate-900'
+        : 'bg-white border-kemenag-100';
+
+  const questionTextStyle = {
+    fontSize: resolvedFontSize,
+    lineHeight: dyslexiaSpacing ? '1.9' : '1.65',
+    ...(dyslexiaSpacing ? { letterSpacing: '0.04em', wordSpacing: '0.12em' } : {})
+  };
+
+  const questionTextColor = isHighContrast
+    ? 'text-yellow-100'
+    : isDark
+      ? 'text-slate-100'
+      : 'text-slate-800';
 
   const typeLabels = {
     single_choice: 'Pilihan Ganda Tunggal',
@@ -43,22 +72,54 @@ export const QuestionCard = ({
   };
 
   return (
-    <Card className="p-6 md:p-8 space-y-6 bg-white rounded-3xl border border-kemenag-100 shadow-sm">
-      {/* Header Soal + Pengatur Ukuran Font */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
+    <Card
+      className={`p-6 md:p-8 space-y-6 rounded-3xl border shadow-sm transition-colors ${cardThemeClass}`}
+      aria-live="polite"
+    >
+      {/* Header Soal + Pengatur Ukuran Font & Suara */}
+      <div className={`flex flex-wrap items-center justify-between gap-3 pb-4 border-b ${
+        isHighContrast ? 'border-yellow-400/40' : isDark ? 'border-slate-700' : 'border-slate-100'
+      }`}>
         <div className="flex items-center gap-3">
-          <span className="flex items-center justify-center w-9 h-9 rounded-2xl bg-kemenag-600 text-white font-extrabold text-sm shadow-sm shadow-kemenag-200">
+          <span className={`flex items-center justify-center w-9 h-9 rounded-2xl font-extrabold text-sm shadow-sm ${
+            isHighContrast
+              ? 'bg-yellow-400 text-black'
+              : 'bg-kemenag-600 text-white shadow-kemenag-200'
+          }`}>
             {questionNumber}
           </span>
-          <span className="text-xs font-semibold px-3 py-1 rounded-xl bg-kemenag-50 text-kemenag-700 border border-kemenag-200">
+          <span className={`text-xs font-semibold px-3 py-1 rounded-xl border ${
+            isHighContrast
+              ? 'bg-black text-yellow-300 border-yellow-400'
+              : isDark
+                ? 'bg-slate-800 text-slate-200 border-slate-600'
+                : 'bg-kemenag-50 text-kemenag-700 border-kemenag-200'
+          }`}>
             {typeLabels[question.type] || 'Soal'}
           </span>
-          <span className="text-xs text-slate-400 font-medium">
+          <span className={`text-xs font-medium ${isHighContrast ? 'text-yellow-300' : 'text-slate-400'}`}>
             Bobot: {question.weight || 1} poin
           </span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {showAudioControls && onToggleSpeak && (
+            <button
+              type="button"
+              onClick={onToggleSpeak}
+              title="Bacakan soal dan pilihan jawaban dengan suara (Alt+B)"
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl text-xs font-bold border transition ${
+                isSpeaking
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : isHighContrast
+                    ? 'bg-yellow-400 text-black border-yellow-300'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600'
+              }`}
+            >
+              {isSpeaking ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-3.5 h-3.5" />}
+              {isSpeaking ? 'Hentikan Suara' : 'Bacakan Soal'}
+            </button>
+          )}
           {(onDecreaseFont || onIncreaseFont) && (
             <div
               className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-2xl px-2 py-1"
@@ -111,8 +172,8 @@ export const QuestionCard = ({
       {/* Teks Soal & Media Gambar (Ukuran Font Seragam Persis dengan Pilihan Jawaban) */}
       <div className="space-y-4">
         <p
-          style={{ fontSize: resolvedFontSize, lineHeight: '1.65' }}
-          className="text-slate-800 font-normal whitespace-pre-line no-select"
+          style={questionTextStyle}
+          className={`${questionTextColor} font-normal whitespace-pre-line ${largeHitTargets || showAudioControls ? '' : 'no-select'}`}
         >
           {question.question_text && !['single_choice', 'multiple_choice', 'essay'].includes(String(question.question_text).trim())
             ? question.question_text
@@ -150,6 +211,9 @@ export const QuestionCard = ({
                   type="single_choice"
                   isSelected={userAnswer === opt.id}
                   fontSizePx={resolvedFontSize}
+                  themeMode={themeMode}
+                  dyslexiaSpacing={dyslexiaSpacing}
+                  largeHitTargets={largeHitTargets}
                   onSelect={() => handleSingleSelect(opt.id)}
                 />
               );
@@ -171,6 +235,9 @@ export const QuestionCard = ({
                   type="multiple_choice"
                   isSelected={isSelected}
                   fontSizePx={resolvedFontSize}
+                  themeMode={themeMode}
+                  dyslexiaSpacing={dyslexiaSpacing}
+                  largeHitTargets={largeHitTargets}
                   onSelect={() => handleMultipleSelect(opt.id)}
                 />
               );
@@ -180,7 +247,7 @@ export const QuestionCard = ({
 
         {question.type === 'essay' && (
           <div className="space-y-2">
-            <label className="block text-xs font-semibold text-slate-500">
+            <label className={`block text-xs font-semibold ${isHighContrast ? 'text-yellow-300' : isDark ? 'text-slate-300' : 'text-slate-500'}`}>
               Ketikkan jawaban uraian Anda pada kotak di bawah:
             </label>
             <textarea
@@ -188,8 +255,16 @@ export const QuestionCard = ({
               value={userAnswer || ''}
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder="Tulis jawaban lengkap Anda di sini..."
-              style={{ fontSize: resolvedFontSize, lineHeight: '1.65' }}
-              className="w-full p-4 rounded-2xl border border-slate-200 focus:border-kemenag-600 focus:ring-2 focus:ring-kemenag-100 text-slate-800 transition resize-y font-normal"
+              style={questionTextStyle}
+              className={`w-full p-4 rounded-2xl border focus:ring-2 transition resize-y font-normal ${
+                isHighContrast
+                  ? 'bg-black border-yellow-400 text-yellow-200 focus:border-yellow-300'
+                  : isDark
+                    ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-indigo-400'
+                    : isCream
+                      ? 'bg-[#FAF6EC] border-amber-300 text-slate-900 focus:border-amber-600'
+                      : 'border-slate-200 focus:border-kemenag-600 focus:ring-kemenag-100 text-slate-800'
+              }`}
             />
             <p className="text-right text-xs text-slate-400">
               {(userAnswer || '').length} karakter

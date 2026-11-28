@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useExam } from '../../context/ExamContext';
@@ -12,11 +12,28 @@ import { ViolationModal } from '../../components/exam/ViolationModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
-import { ChevronLeft, ChevronRight, Send, AlertTriangle, Maximize2, Type, ArrowDown, ArrowUp, Lock, RotateCw, LogOut } from 'lucide-react';
+import { getDisabilityMeta } from '../../utils/disabilityConfig';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Send,
+  AlertTriangle,
+  Maximize2,
+  Type,
+  ArrowDown,
+  ArrowUp,
+  Lock,
+  RotateCw,
+  LogOut,
+  Accessibility,
+  Volume2,
+  Square,
+  Contrast,
+  EyeOff,
+  Eye
+} from 'lucide-react';
 
 const MIN_FONT_SIZE = 14;
-const MAX_FONT_SIZE = 28;
-const DEFAULT_FONT_SIZE = 16;
 const FONT_STEP = 2;
 
 export const ExamRoomPage = () => {
@@ -46,23 +63,88 @@ export const ExamRoomPage = () => {
     submitExam
   } = useExam();
 
+  const disabilityMeta = getDisabilityMeta(participant?.disability_type);
+  const isDisabilityMode = disabilityMeta.skipAntiCheat;
+  const maxFontSize = disabilityMeta.maxFontSizePx || 28;
+  const defaultFontSize = disabilityMeta.defaultFontSizePx || 16;
+
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [fontSizePx, setFontSizePx] = useState(() => {
     const saved = Number(localStorage.getItem('exampro_font_size_px'));
-    if (!Number.isNaN(saved) && saved >= MIN_FONT_SIZE && saved <= MAX_FONT_SIZE) {
-      return saved;
+    if (!Number.isNaN(saved) && saved >= MIN_FONT_SIZE && saved <= 36) {
+      return Math.max(saved, defaultFontSize);
     }
-    return DEFAULT_FONT_SIZE;
+    return defaultFontSize;
   });
 
+  // Preferensi Aksesibilitas Adaptif (otomatis terisi sesuai jenis disabilitas peserta)
+  const [themeMode, setThemeMode] = useState(() => disabilityMeta.defaults.themeMode || 'normal');
+  const [dyslexiaSpacing, setDyslexiaSpacing] = useState(() => Boolean(disabilityMeta.defaults.dyslexiaSpacing));
+  const [largeHitTargets, setLargeHitTargets] = useState(() => Boolean(disabilityMeta.defaults.largeHitTargets));
+  const [calmFocus, setCalmFocus] = useState(() => Boolean(disabilityMeta.defaults.calmFocus));
+  const [hideNavSidebar, setHideNavSidebar] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechRate, setSpeechRate] = useState(1.0);
+
+  // Sinkronkan preferensi default ketika profil disabilitas peserta dimuat
+  useEffect(() => {
+    setThemeMode(disabilityMeta.defaults.themeMode || 'normal');
+    setDyslexiaSpacing(Boolean(disabilityMeta.defaults.dyslexiaSpacing));
+    setLargeHitTargets(Boolean(disabilityMeta.defaults.largeHitTargets));
+    setCalmFocus(Boolean(disabilityMeta.defaults.calmFocus));
+    setFontSizePx(disabilityMeta.defaultFontSizePx || 16);
+  }, [disabilityMeta.key]);
+
   const updateFontSize = (nextSize) => {
-    const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, nextSize));
+    const clamped = Math.max(MIN_FONT_SIZE, Math.min(maxFontSize, nextSize));
     setFontSizePx(clamped);
     localStorage.setItem('exampro_font_size_px', String(clamped));
   };
 
   const handleDecreaseFont = () => updateFontSize(fontSizePx - FONT_STEP);
   const handleIncreaseFont = () => updateFontSize(fontSizePx + FONT_STEP);
+
+  // Fungsi Pembaca Suara Soal & Pilihan (Web Speech API Bahasa Indonesia)
+  const stopSpeaking = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch (e) {}
+    setIsSpeaking(false);
+  }, []);
+
+  const speakCurrentQuestion = useCallback(() => {
+    if (!currentQuestion || typeof window === 'undefined' || !window.speechSynthesis) {
+      alert('Browser Anda tidak mendukung fitur Pembaca Suara otomatis. Anda tetap dapat memakai Screen Reader eksternal.');
+      return;
+    }
+    if (isSpeaking) {
+      stopSpeaking();
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const optsText = (currentQuestion.options || [])
+        .map((opt, idx) => `Pilihan ${String.fromCharCode(65 + idx)}: ${opt.text}.`)
+        .join(' ');
+      const scriptText = `Soal nomor ${currentIndex + 1}. ${currentQuestion.question_text}. ${optsText}`;
+      const utter = new SpeechSynthesisUtterance(scriptText);
+      utter.lang = 'id-ID';
+      utter.rate = speechRate;
+      utter.onend = () => setIsSpeaking(false);
+      utter.onerror = () => setIsSpeaking(false);
+      setIsSpeaking(true);
+      window.speechSynthesis.speak(utter);
+    } catch (e) {
+      setIsSpeaking(false);
+    }
+  }, [currentQuestion, currentIndex, isSpeaking, speechRate, stopSpeaking]);
+
+  useEffect(() => {
+    stopSpeaking();
+    return () => stopSpeaking();
+  }, [currentIndex, stopSpeaking]);
 
   // Auto-exit jika sesi dinonaktifkan pengawas
   useEffect(() => {
@@ -85,7 +167,8 @@ export const ExamRoomPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isParticipantLoggedIn, participantKey, sessionKey, navigate]);
 
-  // Hook Anti-Cheat
+  // Hook Anti-Cheat: HANYA AKTIF bagi peserta Non-Disabilitas!
+  // Peserta penyandang disabilitas dibebaskan dari peringatan tab/blur agar screen reader, magnifier, switch, dll tidak terblokir.
   const {
     violationCount,
     showWarning,
@@ -94,8 +177,51 @@ export const ExamRoomPage = () => {
     requestFullscreen
   } = useAntiCheat({
     onViolation: registerViolation,
-    isExamActive: isParticipantLoggedIn && !submitting
+    isExamActive: isParticipantLoggedIn && !submitting && !isDisabilityMode
   });
+
+  // Pintasan Keyboard untuk Aksesibilitas (Tunanetra / Tunadaksa / Keyboard-Only)
+  useEffect(() => {
+    if (!isDisabilityMode && !disabilityMeta.defaults.keyboardShortcuts) return;
+    const handleA11yKeyDown = (e) => {
+      const tag = String(e.target?.tagName || '').toLowerCase();
+      if (tag === 'textarea' || tag === 'input') return;
+
+      if (e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        speakCurrentQuestion();
+        return;
+      }
+      if (e.key === 'ArrowRight' && currentIndex < totalQuestions - 1) {
+        e.preventDefault();
+        setCurrentIndex(i => i + 1);
+        return;
+      }
+      if (e.key === 'ArrowLeft' && currentIndex > 0) {
+        e.preventDefault();
+        setCurrentIndex(i => i - 1);
+        return;
+      }
+      if (currentQuestion && currentQuestion.type !== 'essay' && currentQuestion.options?.length) {
+        const numIdx = ['1', '2', '3', '4', '5'].indexOf(e.key);
+        const letterIdx = ['a', 'b', 'c', 'd', 'e'].indexOf(e.key.toLowerCase());
+        const pickedIdx = numIdx !== -1 ? numIdx : letterIdx;
+        if (pickedIdx !== -1 && currentQuestion.options[pickedIdx]) {
+          e.preventDefault();
+          const optId = currentQuestion.options[pickedIdx].id;
+          if (currentQuestion.type === 'single_choice') {
+            setAnswer(currentQuestion.question_id, optId);
+          } else {
+            const curr = Array.isArray(answers[currentQuestion.question_id]) ? [...answers[currentQuestion.question_id]] : [];
+            const next = curr.includes(optId) ? curr.filter(x => x !== optId) : [...curr, optId];
+            setAnswer(currentQuestion.question_id, next);
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleA11yKeyDown);
+    return () => window.removeEventListener('keydown', handleA11yKeyDown);
+  }, [isDisabilityMode, disabilityMeta, currentIndex, totalQuestions, currentQuestion, answers, setAnswer, setCurrentIndex, speakCurrentQuestion]);
 
   // Handler Waktu Habis: langsung simpan otomatis semua jawaban
   const handleTimeUp = async () => {
@@ -108,10 +234,13 @@ export const ExamRoomPage = () => {
     }
   };
 
-  // Timer Sinkron Server + Batas Akhir Jadwal Sesi
+  // Timer Sinkron Server + Ekstra Waktu otomatis bagi penyandang disabilitas terkait
+  const baseDuration = Number(sessionData?.duration_minutes) || 60;
+  const effectiveDurationMinutes = Math.round(baseDuration * (disabilityMeta.timeMultiplier || 1));
+
   const timer = useServerTimer({
     startTime: participant?.startTime,
-    durationMinutes: sessionData?.duration_minutes || 60,
+    durationMinutes: effectiveDurationMinutes,
     endAt: sessionData?.end_at,
     onTimeUp: handleTimeUp,
     isActive: isParticipantLoggedIn && !submitting
@@ -195,8 +324,17 @@ export const ExamRoomPage = () => {
   const unAnsweredCount = totalQuestions - answeredCount;
   const flaggedCount = Object.values(flagged).filter(Boolean).length;
 
+  const pageBgClass =
+    themeMode === 'high_contrast'
+      ? 'bg-neutral-950 text-yellow-200'
+      : themeMode === 'dark'
+        ? 'bg-slate-950 text-slate-100'
+        : themeMode === 'dyslexia_cream'
+          ? 'bg-[#F8F3E6] text-slate-900'
+          : 'bg-mint-grid';
+
   return (
-    <div className="min-h-screen flex flex-col bg-mint-grid no-select pb-12">
+    <div className={`min-h-screen flex flex-col pb-12 transition-colors ${pageBgClass} ${isDisabilityMode ? '' : 'no-select'}`}>
       {/* Header Bar dengan Branding Gambar 2 */}
       <HeaderBar
         participantInfo={{
@@ -240,7 +378,7 @@ export const ExamRoomPage = () => {
               <button
                 type="button"
                 onClick={handleIncreaseFont}
-                disabled={fontSizePx >= MAX_FONT_SIZE}
+                disabled={fontSizePx >= maxFontSize}
                 title="Perbesar ukuran font"
                 className="inline-flex items-center gap-0.5 px-2 py-1 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-kemenag-50 hover:text-kemenag-700 hover:border-kemenag-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
@@ -249,29 +387,117 @@ export const ExamRoomPage = () => {
               </button>
             </div>
 
-            <button
-              onClick={requestFullscreen}
-              title="Masuk Mode Layar Penuh"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border border-kemenag-200 text-xs font-semibold text-kemenag-700 hover:bg-kemenag-50"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-              Layar Penuh
-            </button>
+            {!isDisabilityMode && (
+              <button
+                onClick={requestFullscreen}
+                title="Masuk Mode Layar Penuh"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border border-kemenag-200 text-xs font-semibold text-kemenag-700 hover:bg-kemenag-50"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                Layar Penuh
+              </button>
+            )}
 
             <TimerDisplay
               formatTime={timer.formatTime}
-              isLowTime={timer.isLowTime}
-              isCriticalTime={timer.isCriticalTime}
+              isLowTime={!calmFocus && timer.isLowTime}
+              isCriticalTime={!calmFocus && timer.isCriticalTime}
             />
           </div>
         </div>
       </div>
 
+      {/* Bilah Alat Aksesibilitas Khusus Penyandang Disabilitas (Non-Disabilitas tidak melihat ini) */}
+      {isDisabilityMode && (
+        <div className={`border-b px-4 md:px-8 py-2.5 ${
+          themeMode === 'high_contrast'
+            ? 'bg-black border-yellow-400 text-yellow-200'
+            : themeMode === 'dark'
+              ? 'bg-slate-900 border-slate-700 text-slate-100'
+              : 'bg-indigo-50/90 border-indigo-200 text-indigo-950'
+        }`}>
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 font-extrabold px-2.5 py-1 rounded-xl bg-indigo-600 text-white">
+                <Accessibility className="w-3.5 h-3.5" />
+                Mode {disabilityMeta.shortLabel}
+              </span>
+              <span className="text-[11px] font-semibold opacity-90">
+                Peringatan pindah tab dimatikan ({disabilityMeta.extraTimeLabel})
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Pembaca Suara TTS */}
+              <button
+                type="button"
+                onClick={speakCurrentQuestion}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl font-bold border transition ${
+                  isSpeaking ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                }`}
+                title="Bacakan soal dan pilihan jawaban (Alt+B)"
+              >
+                {isSpeaking ? <Square className="w-3 h-3 fill-current" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{isSpeaking ? 'Stop Suara' : 'Baca Suara (Alt+B)'}</span>
+              </button>
+
+              {/* Tema Kontras / Disleksia */}
+              <div className="inline-flex items-center gap-1 bg-white border border-indigo-200 rounded-xl p-0.5 text-slate-700">
+                <Contrast className="w-3.5 h-3.5 text-indigo-600 ml-1" />
+                <select
+                  value={themeMode}
+                  onChange={(e) => setThemeMode(e.target.value)}
+                  className="px-1.5 py-0.5 text-[11px] font-bold bg-transparent focus:outline-none"
+                  title="Pilih mode kontras tampilan"
+                >
+                  <option value="normal">Tema Standar</option>
+                  <option value="high_contrast">Kontras AAA (Hitam-Kuning)</option>
+                  <option value="dark">Mode Gelap</option>
+                  <option value="dyslexia_cream">Krem Disleksia</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDyslexiaSpacing(v => !v)}
+                className={`px-2.5 py-1 rounded-xl font-bold border text-[11px] transition ${
+                  dyslexiaSpacing ? 'bg-amber-200 text-amber-950 border-amber-400' : 'bg-white text-slate-700 border-slate-200'
+                }`}
+              >
+                Spasi Lega
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLargeHitTargets(v => !v)}
+                className={`px-2.5 py-1 rounded-xl font-bold border text-[11px] transition ${
+                  largeHitTargets ? 'bg-teal-200 text-teal-950 border-teal-400' : 'bg-white text-slate-700 border-slate-200'
+                }`}
+              >
+                Tombol Besar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setHideNavSidebar(v => !v)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl font-bold border text-[11px] transition ${
+                  hideNavSidebar ? 'bg-indigo-200 text-indigo-950 border-indigo-400' : 'bg-white text-slate-700 border-slate-200'
+                }`}
+                title="Sembunyikan/tampilkan daftar nomor agar fokus membaca soal"
+              >
+                {hideNavSidebar ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                <span>{hideNavSidebar ? 'Tampilkan Grid' : 'Fokus Tenang'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto w-full px-4 md:px-8 pt-6 flex-1">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-          {/* Kolom Soal (3 Kolom) */}
-          <div className="lg:col-span-3 space-y-6">
+          {/* Kolom Soal (3 Kolom atau Penuh saat Fokus Tenang) */}
+          <div className={`${hideNavSidebar ? 'lg:col-span-4' : 'lg:col-span-3'} space-y-6`}>
             <QuestionCard
               questionNumber={currentIndex + 1}
               question={currentQuestion}
@@ -281,9 +507,15 @@ export const ExamRoomPage = () => {
               onToggleFlag={() => toggleFlag(currentQuestion.question_id)}
               fontSizePx={fontSizePx}
               minFontSize={MIN_FONT_SIZE}
-              maxFontSize={MAX_FONT_SIZE}
+              maxFontSize={maxFontSize}
               onDecreaseFont={handleDecreaseFont}
               onIncreaseFont={handleIncreaseFont}
+              themeMode={themeMode}
+              dyslexiaSpacing={dyslexiaSpacing}
+              largeHitTargets={largeHitTargets}
+              showAudioControls={isDisabilityMode}
+              isSpeaking={isSpeaking}
+              onToggleSpeak={speakCurrentQuestion}
             />
 
             {/* Navigasi Bawah Soal */}
@@ -325,7 +557,8 @@ export const ExamRoomPage = () => {
             </div>
           </div>
 
-          {/* Sidebar Navigasi Grid (1 Kolom) */}
+          {/* Sidebar Navigasi Grid (1 Kolom, disembunyikan jika Fokus Tenang aktif) */}
+          {!hideNavSidebar && (
           <div className="lg:col-span-1 space-y-4">
             <NavGrid
               questions={questions}
@@ -366,6 +599,7 @@ export const ExamRoomPage = () => {
               </button>
             )}
           </div>
+          )}
         </div>
       </main>
 
@@ -400,12 +634,14 @@ export const ExamRoomPage = () => {
           </div>
         </Modal>
       )}
-      <ViolationModal
-        isOpen={showWarning}
-        onClose={closeWarning}
-        violationCount={violationCount}
-        message={warningMessage}
-      />
+      {!isDisabilityMode && (
+        <ViolationModal
+          isOpen={showWarning}
+          onClose={closeWarning}
+          violationCount={violationCount}
+          message={warningMessage}
+        />
+      )}
 
       {/* Modal Konfirmasi Submit */}
       <Modal

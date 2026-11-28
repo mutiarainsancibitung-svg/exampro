@@ -3,6 +3,7 @@
  * Menggunakan library SheetJS (XLSX) untuk menghasilkan file Microsoft Excel (.xlsx) asli.
  */
 import * as XLSX from 'xlsx';
+import { normalizeDisabilityType, getDisabilityMeta } from './disabilityConfig';
 
 // ==========================================
 // 1. BANK SOAL TEMPLATE (.xlsx)
@@ -275,7 +276,9 @@ export const PARTICIPANT_HEADERS = [
   'Jenis_Kelamin',
   'NIP_NIM',
   'Kelas',
-  'Asal_Madrasah_Sekolah'
+  'Asal_Madrasah_Sekolah',
+  'Keterangan_Disabilitas',
+  'Catatan_Kebutuhan_Khusus'
 ];
 
 export const SAMPLE_PARTICIPANTS = [
@@ -287,7 +290,9 @@ export const SAMPLE_PARTICIPANTS = [
     'Laki-Laki',
     '198501012010121001',
     'Kelas A',
-    'MAN 1 Kota Jakarta'
+    'MAN 1 Kota Jakarta',
+    'Non-Disabilitas',
+    ''
   ],
   [
     2,
@@ -297,7 +302,9 @@ export const SAMPLE_PARTICIPANTS = [
     'Perempuan',
     '199002152015032002',
     'Kelas A',
-    'MTsN 2 Jakarta Selatan'
+    'MTsN 2 Jakarta Selatan',
+    'Tunanetra',
+    'Menggunakan screen reader NVDA / TTS'
   ],
   [
     3,
@@ -307,7 +314,9 @@ export const SAMPLE_PARTICIPANTS = [
     '-',
     '198807122014021003',
     'Kelas B',
-    'SMAN 4 Jakarta Barat'
+    'SMAN 4 Jakarta Barat',
+    'Low Vision',
+    'Butuh huruf besar & kontras tinggi'
   ]
 ];
 
@@ -327,7 +336,9 @@ export const downloadParticipantExcelTemplate = () => {
     { wch: 15 }, // Jenis_Kelamin
     { wch: 22 }, // NIP_NIM
     { wch: 14 }, // Kelas
-    { wch: 32 }  // Asal_Madrasah_Sekolah
+    { wch: 30 }, // Asal_Madrasah_Sekolah
+    { wch: 24 }, // Keterangan_Disabilitas
+    { wch: 32 }  // Catatan_Kebutuhan_Khusus
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Data_Peserta');
@@ -347,7 +358,9 @@ export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta
     (p.gender && p.gender !== '-') ? p.gender : '-',
     p.identifier || '',
     p.kelas || '-',
-    p.institution || ''
+    p.institution || '',
+    getDisabilityMeta(p.disability_type).shortLabel,
+    p.disability_note || ''
   ]);
 
   const wsData = [PARTICIPANT_HEADERS, ...rows];
@@ -361,6 +374,8 @@ export const exportParticipantsToExcel = (participants, filename = 'Data_Peserta
     { wch: 15 },
     { wch: 22 },
     { wch: 14 },
+    { wch: 30 },
+    { wch: 24 },
     { wch: 32 }
   ];
 
@@ -390,6 +405,8 @@ export const parseUploadedParticipantFile = async (file) => {
   const idxId = headerRow.findIndex(h => h.includes('nip') || h.includes('nim') || h.includes('nik') || h.includes('id'));
   const idxKelas = headerRow.findIndex(h => h.includes('kelas') || h.includes('rombel') || h.includes('group'));
   const idxSchool = headerRow.findIndex(h => h.includes('asal') || h.includes('madrasah') || h.includes('sekolah') || h.includes('instansi'));
+  const idxDisabilitas = headerRow.findIndex(h => h.includes('disabil') || h.includes('kebutuhan_khusus') || h.includes('difabel'));
+  const idxDisabilitasNote = headerRow.findIndex(h => h.includes('catatan') || h.includes('keterangan_khusus'));
   const idxPaket = headerRow.findIndex(h => h.includes('paket'));
 
   const parsedParticipants = [];
@@ -428,6 +445,11 @@ export const parseUploadedParticipantFile = async (file) => {
 
     // Paket dari Excel (jika ada kolom paket dibaca, jika tidak ada default '-')
     const paket = idxPaket !== -1 ? (String(row[idxPaket] || '').trim() || '-') : '-';
+    const rawDisabilitas = idxDisabilitas !== -1 ? String(row[idxDisabilitas] || '') : (row[8] !== undefined ? String(row[8] || '') : '');
+    const disabilityType = normalizeDisabilityType(rawDisabilitas);
+    const disabilityNote = idxDisabilitasNote !== -1
+      ? String(row[idxDisabilitasNote] || '').trim()
+      : (row[9] !== undefined ? String(row[9] || '').trim() : '');
 
     if (username || fullName) {
       parsedParticipants.push({
@@ -438,7 +460,9 @@ export const parseUploadedParticipantFile = async (file) => {
         identifier: identifier || username,
         kelas: kelas,
         institution: institution,
-        paket: paket
+        paket: paket,
+        disability_type: disabilityType,
+        disability_note: disabilityNote
       });
     }
   }

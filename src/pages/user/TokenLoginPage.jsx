@@ -7,7 +7,8 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import { getMinuteRotatingToken, getSecondsRemainingInCurrentMinute } from '../../utils/rotatingToken';
-import { User, Lock, Eye, EyeOff, RotateCw, AlertCircle, Clock } from 'lucide-react';
+import { getDisabilityMeta } from '../../utils/disabilityConfig';
+import { User, Lock, Eye, EyeOff, RotateCw, AlertCircle, Clock, Accessibility, ShieldAlert } from 'lucide-react';
 
 export const TokenLoginPage = () => {
   const navigate = useNavigate();
@@ -26,6 +27,8 @@ export const TokenLoginPage = () => {
   const [confirmFullName, setConfirmFullName] = useState('');
   const [userKelas, setUserKelas] = useState('Kelas A');
   const [userPaket, setUserPaket] = useState('Pretest');
+  const [userDisabilityType, setUserDisabilityType] = useState('none');
+  const [userDisabilityNote, setUserDisabilityNote] = useState('');
   const [tokenInput, setTokenInput] = useState('');
 
   // Info Sesi & Token Berputar Otomatis Setiap 1 Menit
@@ -100,6 +103,8 @@ export const TokenLoginPage = () => {
         setGender(p.gender === 'Perempuan' ? 'Perempuan' : 'Laki-Laki');
         setUserKelas(p.kelas || 'Kelas A');
         setUserPaket(p.paket && p.paket !== '-' ? p.paket : (res.activeSession?.type || 'Pretest'));
+        setUserDisabilityType(p.disability_type || 'none');
+        setUserDisabilityNote(p.disability_note || '');
         if (res.activeSession) {
           setActiveSession(res.activeSession);
           setRotatingToken(getMinuteRotatingToken(res.activeSession.session_id || 'PAI_TOT'));
@@ -141,6 +146,8 @@ export const TokenLoginPage = () => {
       });
 
       if (res.status === 'success') {
+        const resolvedDisType = res.disability_type || userDisabilityType || 'none';
+        const resolvedDisNote = res.disability_note || userDisabilityNote || '';
         loginParticipant(
           {
             participantId: res.participantId,
@@ -149,6 +156,8 @@ export const TokenLoginPage = () => {
             gender: gender,
             kelas: userKelas,
             paket: userPaket,
+            disability_type: resolvedDisType,
+            disability_note: resolvedDisNote,
             token: tokenInput.trim().toUpperCase(),
             startTime: res.startTime
           },
@@ -400,6 +409,42 @@ export const TokenLoginPage = () => {
                       </span>
                     )}
                   </div>
+
+                  {/* Status Akomodasi Disabilitas & Pengawasan Tab */}
+                  {(() => {
+                    const meta = getDisabilityMeta(userDisabilityType);
+                    if (meta.skipAntiCheat) {
+                      return (
+                        <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-extrabold text-indigo-950 flex items-center gap-1.5">
+                              <Accessibility className="w-4 h-4 text-indigo-600 shrink-0" />
+                              Mode Aksesibilitas: {meta.shortLabel}
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
+                              {meta.extraTimeLabel}
+                            </span>
+                          </div>
+                          {userDisabilityNote && (
+                            <p className="text-[11px] text-indigo-800 italic">Catatan: {userDisabilityNote}</p>
+                          )}
+                          <ul className="list-disc list-inside text-[11px] text-indigo-900 space-y-0.5">
+                            {meta.accommodations.slice(0, 3).map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center gap-2">
+                        <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>
+                          <strong>Peserta Non-Disabilitas:</strong> Pengawasan pindah tab / keluar layar aktif selama ujian.
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Input Konfirmasi: Nama Peserta */}
                   <div>

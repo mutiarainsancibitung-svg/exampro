@@ -17,7 +17,7 @@ const SHEETS = {
 const HEADERS = {
   Sessions: ['session_id', 'title', 'type', 'token', 'duration_minutes', 'is_active', 'shuffle_questions', 'shuffle_options', 'show_score', 'created_at', 'start_at', 'end_at'],
   Questions: ['question_id', 'session_id', 'paket', 'type', 'question_text', 'image_url', 'options_json', 'key_answer', 'weight'],
-  Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'kelas', 'institution', 'paket', 'token_used', 'start_time', 'status'],
+  Participants: ['participant_id', 'session_id', 'username', 'password', 'full_name', 'gender', 'identifier', 'kelas', 'institution', 'paket', 'token_used', 'start_time', 'status', 'disability_type', 'disability_note'],
   Submissions: ['submission_id', 'participant_id', 'session_id', 'answers_json', 'pg_score', 'essay_score', 'total_score', 'tab_switch_count', 'submitted_at'],
   Admins: ['admin_id', 'username', 'password', 'name', 'role', 'is_active', 'created_at']
 };
@@ -889,7 +889,9 @@ function handleStartExam(payload) {
       payload.paket || session.type || 'Pretest',
       token.trim().toUpperCase(),
       effectiveStartTime,
-      'in_progress'
+      'in_progress',
+      payload.disability_type || 'none',
+      payload.disability_note || ''
     ]);
   }
 
@@ -914,11 +916,16 @@ function handleStartExam(payload) {
   proctorData[cleanIdentLower] = proctorData[participantId];
   try { cache.put(cacheKey, JSON.stringify(proctorData), 10800); } catch (e) {}
 
+  const resolvedDisType = existingRowData && existingRowData[13] ? String(existingRowData[13]).trim() : (payload.disability_type || 'none');
+  const resolvedDisNote = existingRowData && existingRowData[14] ? String(existingRowData[14]).trim() : (payload.disability_note || '');
+
   return {
     status: 'success',
     participantId: participantId,
     startTime: effectiveStartTime,
-    session: session
+    session: session,
+    disability_type: resolvedDisType || 'none',
+    disability_note: resolvedDisNote || ''
   };
 }
 
@@ -1927,7 +1934,9 @@ function handleParticipantLogin(payload) {
       kelas: found.kelas || '-',
       institution: found.institution || '',
       paket: (found.paket && found.paket !== '-') ? found.paket : (targetSession.type || 'Pretest'),
-      status: found.status
+      status: found.status,
+      disability_type: found.disability_type || 'none',
+      disability_note: found.disability_note || ''
     },
     activeSession: {
       session_id: targetSession.session_id,
@@ -1953,9 +1962,11 @@ function handleSaveParticipant(payload) {
   const pId = participant.participant_id || ('P-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000));
 
   let existingRow = -1;
+  let existingRowValues = null;
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) === String(pId) || (participant.username && String(rows[i][2]) === String(participant.username))) {
       existingRow = i + 1;
+      existingRowValues = rows[i];
       break;
     }
   }
@@ -1963,6 +1974,13 @@ function handleSaveParticipant(payload) {
     const cleanGender = (participant.gender && String(participant.gender).trim() && String(participant.gender).trim() !== '-')
       ? String(participant.gender).trim()
       : '-';
+
+    const resolvedDisType = participant.disability_type !== undefined
+      ? (participant.disability_type || 'none')
+      : (existingRowValues && existingRowValues[13] ? existingRowValues[13] : 'none');
+    const resolvedDisNote = participant.disability_note !== undefined
+      ? (participant.disability_note || '')
+      : (existingRowValues && existingRowValues[14] ? existingRowValues[14] : '');
 
     const rowData = [
       pId,
@@ -1977,8 +1995,16 @@ function handleSaveParticipant(payload) {
       participant.paket || '-',
       participant.token_used !== undefined ? participant.token_used : '',
       participant.start_time !== undefined ? participant.start_time : '',
-      participant.status || 'registered'
+      participant.status || 'registered',
+      resolvedDisType,
+      resolvedDisNote
     ];
+
+  // Pastikan header sheet Participants mencakup kolom disabilitas
+  if (sheet.getLastColumn() < HEADERS.Participants.length) {
+    sheet.getRange(1, 1, 1, HEADERS.Participants.length).setValues([HEADERS.Participants]);
+    formatHeaderRow(sheet, HEADERS.Participants.length);
+  }
 
   if (existingRow > 0) {
     sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
@@ -2031,6 +2057,15 @@ function handleBatchSaveParticipants(payload) {
       ? String(p.gender).trim()
       : '-';
 
+    const existingRow = existingMap[pId] || existingMap[cleanUsername.toLowerCase()];
+    const prevRowData = existingRow ? existingData[existingRow - 1] : null;
+    const resolvedDisType = p.disability_type !== undefined
+      ? (p.disability_type || 'none')
+      : (prevRowData && prevRowData[13] ? prevRowData[13] : 'none');
+    const resolvedDisNote = p.disability_note !== undefined
+      ? (p.disability_note || '')
+      : (prevRowData && prevRowData[14] ? prevRowData[14] : '');
+
     const rowData = [
       pId,
       targetSessionId,
@@ -2044,10 +2079,16 @@ function handleBatchSaveParticipants(payload) {
       p.paket || '-',
       p.token_used !== undefined ? p.token_used : '',
       p.start_time !== undefined ? p.start_time : '',
-      p.status || 'registered'
+      p.status || 'registered',
+      resolvedDisType,
+      resolvedDisNote
     ];
 
-    const existingRow = existingMap[pId] || existingMap[cleanUsername.toLowerCase()];
+    if (sheet.getLastColumn() < HEADERS.Participants.length) {
+      sheet.getRange(1, 1, 1, HEADERS.Participants.length).setValues([HEADERS.Participants]);
+      formatHeaderRow(sheet, HEADERS.Participants.length);
+    }
+
     if (existingRow) {
       sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
       updatedCount++;
@@ -2520,6 +2561,8 @@ function handleGetLiveProctor(payload) {
       kelas: p.kelas || 'Kelas A',
       institution: p.institution || '',
       paket: p.paket || '-',
+      disability_type: p.disability_type || 'none',
+      disability_note: p.disability_note || '',
       start_time: p.start_time,
       status: status,
       is_online: isOnline,

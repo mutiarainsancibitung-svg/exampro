@@ -9,6 +9,12 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import {
+  DISABILITY_CATEGORIES,
+  getDisabilityMeta,
+  normalizeDisabilityType,
+  isDisabilityParticipant
+} from '../../utils/disabilityConfig';
+import {
   Sliders,
   BookOpen,
   Users,
@@ -23,7 +29,8 @@ import {
   RotateCw,
   AlertCircle,
   Layers,
-  Trash2
+  Trash2,
+  Accessibility
 } from 'lucide-react';
 
 export const ExamSetupPage = () => {
@@ -53,6 +60,7 @@ export const ExamSetupPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClassTable, setFilterClassTable] = useState('ALL');
   const [filterPackageTable, setFilterPackageTable] = useState('ALL');
+  const [filterDisabilityTable, setFilterDisabilityTable] = useState('ALL');
   const [isClearingPlotting, setIsClearingPlotting] = useState(false);
 
   useEffect(() => {
@@ -256,7 +264,12 @@ export const ExamSetupPage = () => {
       (p.identifier || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchClass = filterClassTable === 'ALL' || (p.kelas || '').toLowerCase() === filterClassTable.toLowerCase();
     const matchPkg = filterPackageTable === 'ALL' || (p.paket || '').toLowerCase() === filterPackageTable.toLowerCase();
-    return matchSearch && matchClass && matchPkg;
+    const pDis = normalizeDisabilityType(p.disability_type);
+    const matchDis =
+      filterDisabilityTable === 'ALL' ||
+      (filterDisabilityTable === 'DISABILITY_ONLY' && pDis !== 'none') ||
+      pDis === filterDisabilityTable;
+    return matchSearch && matchClass && matchPkg && matchDis;
   });
 
   const toggleSelectAllTable = () => {
@@ -421,8 +434,14 @@ export const ExamSetupPage = () => {
                         <span className="text-xs font-extrabold text-slate-800 block">
                           {mappedParticipants.length} Orang
                         </span>
+                        {mappedParticipants.some(isDisabilityParticipant) && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 mt-0.5">
+                            <Accessibility className="w-3 h-3" />
+                            {mappedParticipants.filter(isDisabilityParticipant).length} Disabilitas
+                          </span>
+                        )}
                         {mappedClasses.length > 0 && (
-                          <span className="text-[10px] text-slate-500 line-clamp-1">
+                          <span className="text-[10px] text-slate-500 line-clamp-1 block">
                             {mappedClasses.join(', ')}
                           </span>
                         )}
@@ -530,6 +549,19 @@ export const ExamSetupPage = () => {
                     <option key={pkg} value={pkg}>{pkg}</option>
                   ))}
                 </select>
+
+                <select
+                  value={filterDisabilityTable}
+                  onChange={(e) => setFilterDisabilityTable(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-indigo-200 text-xs font-bold bg-indigo-50/70 text-indigo-800"
+                >
+                  <option value="ALL">Semua Kondisi Peserta</option>
+                  <option value="none">Hanya Non-Disabilitas</option>
+                  <option value="DISABILITY_ONLY">Hanya Disabilitas</option>
+                  {DISABILITY_CATEGORIES.filter(c => c.key !== 'none').map(c => (
+                    <option key={c.key} value={c.key}>{c.shortLabel}</option>
+                  ))}
+                </select>
               </div>
 
               <span className="text-xs text-slate-500 font-medium">
@@ -558,6 +590,7 @@ export const ExamSetupPage = () => {
                     <th className="py-3 px-4 w-12 text-center">No</th>
                     <th className="py-3 px-4">Nama Lengkap & NIP</th>
                     <th className="py-3 px-4">Kelas</th>
+                    <th className="py-3 px-4">Disabilitas</th>
                     <th className="py-3 px-4">Mata Ujian Terhubung</th>
                     <th className="py-3 px-4">Paket Soal Aktif</th>
                   </tr>
@@ -566,6 +599,7 @@ export const ExamSetupPage = () => {
                   {filteredParticipants.map((p, idx) => {
                     const isChecked = selectedTableIds.includes(p.participant_id);
                     const mappedSess = sessions.find(s => String(s.session_id) === String(p.session_id));
+                    const disMeta = getDisabilityMeta(p.disability_type);
 
                     return (
                       <tr
@@ -590,6 +624,12 @@ export const ExamSetupPage = () => {
                         <td className="py-3 px-4">
                           <span className="font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
                             {p.kelas || '-'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${disMeta.badgeClass}`}>
+                            {disMeta.key !== 'none' && <Accessibility className="w-3 h-3 shrink-0" />}
+                            {disMeta.shortLabel}
                           </span>
                         </td>
                         <td className="py-3 px-4">
@@ -890,6 +930,12 @@ export const ExamSetupPage = () => {
                               <span className="block truncate">{p.full_name || p.username}</span>
                               <span className="text-[10px] text-slate-400 font-mono font-normal">@{p.username}</span>
                             </div>
+                            {isDisabilityParticipant(p) && (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border shrink-0 ${getDisabilityMeta(p.disability_type).badgeClass}`}>
+                                <Accessibility className="w-3 h-3" />
+                                {getDisabilityMeta(p.disability_type).shortLabel}
+                              </span>
+                            )}
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600 shrink-0">
                               {p.kelas || '-'}
                             </span>
@@ -947,11 +993,17 @@ export const ExamSetupPage = () => {
                     <div className="p-3 rounded-xl bg-white border border-emerald-200">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block">3. Peserta Sasaran</span>
                       <strong className="text-blue-800 block mt-0.5">{wizardTargetParticipants.length} Peserta</strong>
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-[11px] text-slate-500 block">
                         {wizardTargetMode === 'class'
                           ? `Kelas: ${wizardSelectedClasses.join(', ')}`
                           : 'Pilihan Per Orang'}
                       </span>
+                      {wizardTargetParticipants.some(isDisabilityParticipant) && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 mt-1">
+                          <Accessibility className="w-3 h-3" />
+                          {wizardTargetParticipants.filter(isDisabilityParticipant).length} Disabilitas (Aksesibilitas Aktif)
+                        </span>
+                      )}
                     </div>
                   </div>
 

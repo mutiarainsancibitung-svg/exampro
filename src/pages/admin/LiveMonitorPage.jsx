@@ -7,6 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
+import { isDisabilityParticipant, getDisabilityMeta } from '../../utils/disabilityConfig';
 import {
   Radio,
   RefreshCw,
@@ -31,7 +32,8 @@ import {
   Grid,
   List,
   PowerOff,
-  Calendar
+  Calendar,
+  Accessibility
 } from 'lucide-react';
 
 export const LiveMonitorPage = () => {
@@ -625,32 +627,46 @@ export const LiveMonitorPage = () => {
                     )}
                   </div>
 
-                  {/* Anti-Cheat Warning Badge */}
-                  <div className={`p-2.5 rounded-2xl border text-xs flex items-center justify-between ${
-                    hasViolations
-                      ? 'bg-rose-100/80 border-rose-300 text-rose-950 font-bold'
-                      : 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      {hasViolations ? (
-                        <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 animate-bounce" />
-                      ) : (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      )}
+                  {/* Anti-Cheat Warning Badge atau Mode Disabilitas */}
+                  {isDisabilityParticipant(p) ? (
+                    <div className="p-2.5 rounded-2xl border bg-indigo-50/80 border-indigo-200 text-indigo-900 text-xs flex items-center gap-2">
+                      <Accessibility className="w-4 h-4 text-indigo-600 shrink-0" />
                       <div>
-                        <span className="block text-[11px]">
-                          {hasViolations
-                            ? `⚠️ ${p.violations}x Pelanggaran Layar!`
-                            : 'Fokus Ujian Aman (0 Pelanggaran)'}
+                        <span className="block text-[11px] font-bold">
+                          Aksesibilitas: {getDisabilityMeta(p.disability_type).shortLabel}
                         </span>
-                        {p.last_violation_msg && (
-                          <span className="block text-[10px] text-rose-700 font-normal">
-                            {p.last_violation_msg}
-                          </span>
-                        )}
+                        <span className="block text-[10px] text-indigo-700">
+                          Peringatan tab/blur dimatikan (aman untuk alat bantu)
+                        </span>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className={`p-2.5 rounded-2xl border text-xs flex items-center justify-between ${
+                      hasViolations
+                        ? 'bg-rose-100/80 border-rose-300 text-rose-950 font-bold'
+                        : 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {hasViolations ? (
+                          <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 animate-bounce" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        )}
+                        <div>
+                          <span className="block text-[11px]">
+                            {hasViolations
+                              ? `⚠️ ${p.violations}x Pelanggaran Layar!`
+                              : 'Fokus Ujian Aman (0 Pelanggaran)'}
+                          </span>
+                          {p.last_violation_msg && (
+                            <span className="block text-[10px] text-rose-700 font-normal">
+                              {p.last_violation_msg}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Progres Pengerjaan Soal */}
                   <div className="space-y-1.5">

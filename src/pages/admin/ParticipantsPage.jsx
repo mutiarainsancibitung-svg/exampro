@@ -13,6 +13,11 @@ import {
   exportParticipantsToExcel
 } from '../../utils/excelTemplate';
 import {
+  DISABILITY_CATEGORIES,
+  getDisabilityMeta,
+  normalizeDisabilityType
+} from '../../utils/disabilityConfig';
+import {
   Users,
   UserPlus,
   FileSpreadsheet,
@@ -25,7 +30,8 @@ import {
   RotateCw,
   AlertTriangle,
   X,
-  CheckSquare
+  CheckSquare,
+  Accessibility
 } from 'lucide-react';
 
 export const ParticipantsPage = () => {
@@ -39,6 +45,8 @@ export const ParticipantsPage = () => {
   const [filterGender, setFilterGender] = useState('ALL');
   const [filterKelas, setFilterKelas] = useState('ALL');
   const [filterPaket, setFilterPaket] = useState('ALL');
+  const [filterDisability, setFilterDisability] = useState('ALL');
+  const [showDisabilityGuideModal, setShowDisabilityGuideModal] = useState(false);
 
   // Checklist Selection State
   const [selectedParticipantIds, setSelectedParticipantIds] = useState([]);
@@ -58,7 +66,7 @@ export const ParticipantsPage = () => {
   const [deleteAllInput, setDeleteAllInput] = useState('');
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
-  // Form Tambah Peserta Manual (tanpa input paket/tugas)
+  // Form Tambah Peserta Manual (termasuk keterangan disabilitas)
   const [form, setForm] = useState({
     username: '',
     password: '',
@@ -66,7 +74,9 @@ export const ParticipantsPage = () => {
     gender: '-',
     identifier: '',
     kelas: '',
-    institution: ''
+    institution: '',
+    disability_type: 'none',
+    disability_note: ''
   });
 
   useEffect(() => {
@@ -111,7 +121,9 @@ export const ParticipantsPage = () => {
         identifier: form.identifier.trim(),
         kelas: form.kelas.trim() || '-',
         institution: form.institution.trim(),
-        paket: '-'
+        paket: '-',
+        disability_type: form.disability_type || 'none',
+        disability_note: form.disability_note.trim()
       });
       setShowAddModal(false);
       setForm({
@@ -121,7 +133,9 @@ export const ParticipantsPage = () => {
         gender: '-',
         identifier: '',
         kelas: '',
-        institution: ''
+        institution: '',
+        disability_type: 'none',
+        disability_note: ''
       });
       loadData(true);
       alert('Data peserta berhasil disimpan!');
@@ -173,7 +187,9 @@ export const ParticipantsPage = () => {
       kelas: p.kelas || '-',
       institution: p.institution || '',
       paket: p.paket || '-',
-      status: p.status || 'registered'
+      status: p.status || 'registered',
+      disability_type: normalizeDisabilityType(p.disability_type),
+      disability_note: p.disability_note || ''
     });
     setShowEditModal(true);
   };
@@ -192,7 +208,9 @@ export const ParticipantsPage = () => {
         ...editingParticipant,
         gender: editingParticipant.gender || '-',
         kelas: editingParticipant.kelas || '-',
-        paket: editingParticipant.paket || '-'
+        paket: editingParticipant.paket || '-',
+        disability_type: editingParticipant.disability_type || 'none',
+        disability_note: editingParticipant.disability_note || ''
       });
       setShowEditModal(false);
       setEditingParticipant(null);
@@ -291,7 +309,13 @@ export const ParticipantsPage = () => {
     const matchPaket =
       filterPaket === 'ALL' || (p.paket || '').trim().toLowerCase() === filterPaket.toLowerCase();
 
-    return matchSearch && matchGender && matchKelas && matchPaket;
+    const pDisType = normalizeDisabilityType(p.disability_type);
+    const matchDisability =
+      filterDisability === 'ALL' ||
+      (filterDisability === 'DISABILITY_ONLY' && pDisType !== 'none') ||
+      pDisType === filterDisability;
+
+    return matchSearch && matchGender && matchKelas && matchPaket && matchDisability;
   });
 
   // Checklist Selection Handlers
@@ -382,10 +406,34 @@ export const ParticipantsPage = () => {
               <option value="Laki-Laki">Laki-Laki</option>
               <option value="Perempuan">Perempuan</option>
             </select>
+
+            {/* Filter Keterangan Disabilitas */}
+            <select
+              value={filterDisability}
+              onChange={(e) => setFilterDisability(e.target.value)}
+              className="px-3 py-2 rounded-2xl border border-indigo-200 text-xs bg-indigo-50/70 font-bold text-indigo-800"
+            >
+              <option value="ALL">Semua Kondisi Peserta</option>
+              <option value="none">Hanya Non-Disabilitas</option>
+              <option value="DISABILITY_ONLY">Semua Penyandang Disabilitas</option>
+              {DISABILITY_CATEGORIES.filter(c => c.key !== 'none').map(c => (
+                <option key={c.key} value={c.key}>{c.shortLabel}</option>
+              ))}
+            </select>
           </div>
 
           {/* Tombol Aksi Excel & Tambah Peserta */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Panduan Konsep & Matriks Kebutuhan Disabilitas */}
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Accessibility}
+              onClick={() => setShowDisabilityGuideModal(true)}
+              className="border-indigo-300 text-indigo-800 bg-indigo-50/60 hover:bg-indigo-100"
+            >
+              Panduan Disabilitas
+            </Button>
             {/* Tombol Segarkan */}
             <Button
               variant="outline"
@@ -531,6 +579,7 @@ export const ParticipantsPage = () => {
                     <th className="py-3 px-4 min-w-[130px]">Kelas</th>
                     <th className="py-3 px-4 min-w-[110px]">Jenis Kelamin</th>
                     <th className="py-3 px-4 min-w-[200px]">Asal Madrasah / Sekolah</th>
+                    <th className="py-3 px-4 min-w-[160px]">Keterangan Disabilitas</th>
                     <th className="py-3 px-4 min-w-[120px]">Paket Soal</th>
                     <th className="py-3 px-4 min-w-[90px]">Status</th>
                     <th className="py-3 px-4 text-center w-24">Aksi</th>
@@ -608,6 +657,32 @@ export const ParticipantsPage = () => {
                           <span className="inline-block max-w-[240px] break-words leading-relaxed text-slate-700 font-medium text-left">
                             {p.institution || '-'}
                           </span>
+                        </td>
+
+                        {/* Keterangan Disabilitas & Status Anti-Cheat */}
+                        <td className="py-3.5 px-4 align-top">
+                          {(() => {
+                            const meta = getDisabilityMeta(p.disability_type);
+                            return (
+                              <div className="space-y-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${meta.badgeClass}`}
+                                  title={meta.needsSummary}
+                                >
+                                  {meta.key !== 'none' && <Accessibility className="w-3 h-3 shrink-0" />}
+                                  {meta.shortLabel}
+                                </span>
+                                <span className="block text-[10px] text-slate-400">
+                                  {meta.skipAntiCheat ? 'Bebas cek pindah tab' : 'Deteksi tab aktif'}
+                                </span>
+                                {p.disability_note && (
+                                  <span className="block text-[10px] text-indigo-700 italic max-w-[170px] break-words">
+                                    "{p.disability_note}"
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Paket Soal yang Ditugaskan */}
@@ -739,7 +814,7 @@ export const ParticipantsPage = () => {
               Petunjuk Kolom Template Excel (.xlsx):
             </h5>
             <p>
-              Kolom wajib: <code>No, Username, Password, Nama_Lengkap, Jenis_Kelamin, NIP_NIM, Kelas, Asal_Madrasah_Sekolah</code>.
+              Kolom wajib: <code>No, Username, Password, Nama_Lengkap, Jenis_Kelamin, NIP_NIM, Kelas, Asal_Madrasah_Sekolah</code>. Kolom opsional baru: <code>Keterangan_Disabilitas, Catatan_Kebutuhan_Khusus</code>.
             </p>
             <p className="text-emerald-800">
               Jika <strong>Jenis_Kelamin</strong> dikosongkan pada Excel, sistem otomatis mengisinya dengan tanda strip (<strong>-</strong>).
@@ -916,6 +991,40 @@ export const ParticipantsPage = () => {
             </div>
           </div>
 
+            <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Accessibility className="w-4 h-4 text-indigo-600" />
+                  Keterangan Disabilitas & Penyesuaian Ujian
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
+                  {getDisabilityMeta(form.disability_type).skipAntiCheat ? 'Tanpa Peringatan Tab' : 'Anti-Cheat Aktif'}
+                </span>
+              </div>
+
+              <select
+                value={form.disability_type}
+                onChange={(e) => setForm({ ...form, disability_type: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs font-bold text-slate-800"
+              >
+                {DISABILITY_CATEGORIES.map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+
+              <p className="text-[11px] text-indigo-900 leading-relaxed">
+                {getDisabilityMeta(form.disability_type).needsSummary}
+              </p>
+
+              <input
+                type="text"
+                value={form.disability_note}
+                onChange={(e) => setForm({ ...form, disability_note: e.target.value })}
+                placeholder="Catatan khusus (opsional), misal: Pakai NVDA / butuh font 24px"
+                className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs"
+              />
+            </div>
+
           <div className="flex gap-2 pt-3 border-t border-slate-100">
             <Button variant="secondary" className="flex-1" onClick={() => setShowAddModal(false)}>
               Batal
@@ -1037,6 +1146,40 @@ export const ParticipantsPage = () => {
               />
             </div>
 
+            <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Accessibility className="w-4 h-4 text-indigo-600" />
+                  Keterangan Disabilitas & Penyesuaian Ujian
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
+                  {getDisabilityMeta(editingParticipant.disability_type).skipAntiCheat ? 'Tanpa Peringatan Tab' : 'Anti-Cheat Aktif'}
+                </span>
+              </div>
+
+              <select
+                value={editingParticipant.disability_type || 'none'}
+                onChange={(e) => setEditingParticipant({ ...editingParticipant, disability_type: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs font-bold text-slate-800"
+              >
+                {DISABILITY_CATEGORIES.map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+
+              <p className="text-[11px] text-indigo-900 leading-relaxed">
+                {getDisabilityMeta(editingParticipant.disability_type).needsSummary}
+              </p>
+
+              <input
+                type="text"
+                value={editingParticipant.disability_note || ''}
+                onChange={(e) => setEditingParticipant({ ...editingParticipant, disability_note: e.target.value })}
+                placeholder="Catatan kebutuhan khusus peserta (opsional)"
+                className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs"
+              />
+            </div>
+
             <div className="flex gap-2 pt-3 border-t border-slate-100">
               <Button
                 variant="secondary"
@@ -1052,6 +1195,40 @@ export const ParticipantsPage = () => {
           </form>
         </Modal>
       )}
+
+      {/* Modal Panduan Konsep & Matriks Kebutuhan Disabilitas */}
+      <Modal
+        isOpen={showDisabilityGuideModal}
+        onClose={() => setShowDisabilityGuideModal(false)}
+        title="Konsep Akomodasi & Penyesuaian Ujian Penyandang Disabilitas"
+        maxWidth="max-w-3xl"
+      >
+        <div className="space-y-3 text-xs max-h-[75vh] overflow-y-auto pr-1">
+          <p className="text-slate-600 leading-relaxed bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
+            Setiap peserta yang ditandai sebagai <strong>Penyandang Disabilitas</strong> otomatis dibebaskan dari peringatan pelanggaran pindah tab/blur (agar pembaca layar, magnifier, keyboard bantu, dan alat aksesibilitas tidak terblokir) serta menerima tampilan UI & fasilitas ujian yang disesuaikan:
+          </p>
+          <div className="grid grid-cols-1 gap-3">
+            {DISABILITY_CATEGORIES.map((cat) => (
+              <div key={cat.key} className="p-4 rounded-2xl border border-slate-200 bg-white space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className={`px-2.5 py-0.5 rounded-xl font-bold text-[11px] border ${cat.badgeClass}`}>
+                    {cat.label}
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-600">
+                    {cat.extraTimeLabel} • {cat.skipAntiCheat ? 'Tanpa Peringatan Tab' : 'Peringatan Tab Aktif'}
+                  </span>
+                </div>
+                <p className="text-slate-600">{cat.needsSummary}</p>
+                <ul className="list-disc list-inside text-[11px] text-slate-700 space-y-0.5 pt-1">
+                  {cat.accommodations.map((acc, i) => (
+                    <li key={i}>{acc}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
     </AdminLayout>
   );
 };
